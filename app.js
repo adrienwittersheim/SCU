@@ -8,14 +8,12 @@ const TIMER_KEY = 'scu.timer';
 const STEP = 15;                 // pas du minuteur, en secondes
 const REST_MAX = 600;
 const OVERTIME = 10 * 60 * 1000; // le dépassement s'affiche 10 min au plus
-const BARS = 48;                 // segments du vumètre
-
 const I = {
-  dots: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="10.25" width="3.5" height="3.5"/><rect x="10.25" y="10.25" width="3.5" height="3.5"/><rect x="17.5" y="10.25" width="3.5" height="3.5"/></svg>',
-  back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4.5 7.5 12l7.5 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square"/></svg>',
-  plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 12h16" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
-  play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15L19.5 12z"/></svg>',
-  stop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12"/></svg>',
+  dots: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
+  back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5v15M4.5 12h15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13a.7.7 0 0 0 1.05.6l10.4-6.5a.7.7 0 0 0 0-1.2L9.05 4.9A.7.7 0 0 0 8 5.5z"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg>',
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -40,16 +38,17 @@ const parseNum = str => { const t = str.trim().replace(',', '.'); return t ? num
 const logged = st => st.r != null; // une série compte dès qu'elle a des répétitions
 const clampRest = v => (Number(v) > 0 ? Math.min(REST_MAX, Math.max(STEP, Math.round(v / STEP) * STEP)) : 90);
 
-const dfWeekday = new Intl.DateTimeFormat('fr-FR', { weekday: 'short' });
-function dayMonth(s) {
+const dfLong = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+const dfLongY = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+const sameYear = s => parseISO(s).getFullYear() === new Date().getFullYear();
+const longDate = s => (sameYear(s) ? dfLong : dfLongY).format(parseISO(s));
+function shortDate(s) {
   const d = parseISO(s);
-  const y = d.getFullYear() === new Date().getFullYear() ? '' : '.' + String(d.getFullYear()).slice(2);
-  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}${y}`;
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}${sameYear(s) ? '' : '.' + String(d.getFullYear()).slice(2)}`;
 }
-const stamp = s => `${dfWeekday.format(parseISO(s)).replace('.', '')} ${dayMonth(s)}`;
 
 const fmtSet = st => (st.w ? `${fmt(st.w)}×${st.r}` : `${st.r} rép`);
-const recordHTML = st => (st.w ? `${fmt(st.w)}<small>kg</small> × ${st.r}` : `${st.r}<small>rép</small>`);
+const fmtRecord = st => (st.w ? `${fmt(st.w)} kg × ${st.r}` : `${st.r} rép`);
 const heavier = (a, b) => (a.w ?? 0) > (b.w ?? 0) || ((a.w ?? 0) === (b.w ?? 0) && a.r > b.r);
 const topSet = sets => sets.reduce((best, st) => (heavier(st, best) ? st : best));
 
@@ -125,13 +124,6 @@ const order = s => `${s.date}|${String(s.createdAt).padStart(15, '0')}`;
 const sortedSessions = () => [...db.sessions].sort((a, b) => cmp(order(b), order(a)));
 const blankSets = n => Array.from({ length: n }, () => ({ w: null, r: null, done: false }));
 const newSession = () => ({ id: uid(), date: today(), createdAt: Date.now(), name: '', entries: [] });
-
-// Numéro de chaque séance, dans l'ordre chronologique.
-function numbers() {
-  const m = new Map();
-  [...db.sessions].sort((a, b) => cmp(order(a), order(b))).forEach((s, i) => m.set(s.id, i + 1));
-  return m;
-}
 
 // Un exercice n'existe que tant qu'une séance l'utilise.
 function pruneExercises() {
@@ -254,71 +246,54 @@ function route() {
   paintTimer();
 }
 
-function backBtn(parent) {
-  const prev = navStack.length > 1 ? navStack[navStack.length - 2] : '#' + parent;
-  const label = prev.startsWith('#/s/') ? 'Séance' : prev.startsWith('#/e/') ? 'Exercice' : 'Séances';
-  return `<button class="back" data-act="back" data-parent="${esc(parent)}">${I.back}<span class="label">${label}</span></button>`;
-}
+const backBtn = parent => `<button class="icon" data-act="back" data-parent="${esc(parent)}" aria-label="Retour">${I.back}</button>`;
 
 /* ---------- Écrans ---------- */
 
 function renderSessions() {
   prune();
   cur = { view: 'sessions' };
-  const list = sortedSessions();
-  const nums = numbers();
-  const rows = list.map(s => `
+  const rows = sortedSessions().map(s => `
     <a class="srow" href="#/s/${s.id}">
-      <span class="srow-top"><span class="snum">${pad(nums.get(s.id))}</span><span class="micro">${esc(stamp(s.date))}</span></span>
-      <span class="sname">${esc(s.name.trim() || 'Sans titre')}</span>
-      <span class="ssub">${esc(s.entries.map(en => exName(en.exerciseId)).join(' · ') || '—')}</span>
+      <span class="sname">${esc(s.name.trim() || 'sans titre')}</span>
+      <span class="sdate">${shortDate(s.date)}</span>
+      <span class="ssub">${esc(s.entries.map(en => exName(en.exerciseId)).join(', '))}</span>
     </a>`).join('');
   app.innerHTML = `
-    <header class="bar">
-      <span class="label">SCU</span>
-      <button class="icon" data-act="app-menu" aria-label="Sauvegarde">${I.dots}</button>
-    </header>
-    <section class="panel list">
-      <div class="phead"><span class="label">Séances</span><span class="micro">${pad(list.length)}</span></div>
-      ${rows || '<div class="void"><span class="void-num">00</span><span class="micro">Aucune séance</span></div>'}
-    </section>
-    <div class="dock"><button class="block" data-act="new-session"><span>Nouvelle séance</span>${I.plus}</button></div>`;
+    <header class="top"><span></span><button class="icon" data-act="app-menu" aria-label="Sauvegarde">${I.dots}</button></header>
+    <h1 class="home-title">séances</h1>
+    ${rows || '<p class="empty">aucune séance</p>'}
+    <button class="fab" data-act="new-session" aria-label="Nouvelle séance">${I.plus}</button>`;
 }
 
 function renderSession(s) {
   cur = { view: 'session', session: s };
   app.innerHTML = `
-    <header class="bar">${backBtn('/')}<button class="icon" data-act="session-menu" aria-label="Options de la séance">${I.dots}</button></header>
-    <section class="panel">
-      <div class="phead">
-        <span class="label">Séance ${pad(numbers().get(s.id))}</span>
-        <label class="micro date"><span class="date-text">${esc(stamp(s.date))}</span><input type="date" data-field="date" value="${s.date}" aria-label="Date de la séance"></label>
-      </div>
-      <input class="title" data-field="name" value="${esc(s.name)}" placeholder="Sans titre" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" aria-label="Nom de la séance">
-    </section>
+    <header class="top">${backBtn('/')}<button class="icon" data-act="session-menu" aria-label="Options de la séance">${I.dots}</button></header>
+    <input class="title" data-field="name" value="${esc(s.name)}" placeholder="sans titre" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" aria-label="Nom de la séance">
+    <label class="date"><span class="date-text">${esc(longDate(s.date))}</span><input type="date" data-field="date" value="${s.date}" aria-label="Date de la séance"></label>
     ${s.entries.map(en => entryHTML(s, en)).join('')}
-    <button class="panel addrow" data-act="add-exercise"><span class="label">Ajouter un exercice</span>${I.plus}</button>`;
+    <button class="addex" data-act="add-exercise">${I.plus}<span>exercice</span></button>`;
 }
 
 function entryHTML(s, en) {
   const ex = exById(en.exerciseId) || { id: en.exerciseId, name: '?' };
   const sug = suggestions(s, en);
   const rows = en.sets.map((st, i) => `
-    <div class="sgrid set${st.done ? ' done' : ''}" data-i="${i}">
-      <span class="idx">${pad(i + 1)}</span>
+    <div class="set${st.done ? ' done' : ''}" data-i="${i}">
       <input class="num" data-field="w" inputmode="decimal" autocomplete="off" value="${fmt(st.w)}" placeholder="${fmt(sug[i].w)}" aria-label="Charge en kilos, série ${i + 1}">
-      <input class="num" data-field="r" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${fmt(st.r)}" placeholder="${fmt(sug[i].r)}" aria-label="Répétitions, série ${i + 1}">
-      <button class="switch" data-act="toggle-set" role="switch" aria-checked="${st.done}" aria-label="Série ${i + 1} faite"><i></i></button>
+      <span class="unit">kg</span>
+      <span class="times">×</span>
+      <input class="num r" data-field="r" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${fmt(st.r)}" placeholder="${fmt(sug[i].r)}" aria-label="Répétitions, série ${i + 1}">
+      <button class="dot" data-act="toggle-set" role="switch" aria-checked="${st.done}" aria-label="Série ${i + 1} faite"><i></i></button>
     </div>`).join('');
-  return `<section class="panel entry" data-entry="${en.id}">
-    <div class="phead">
-      <span class="label">Exercice ${pad(s.entries.indexOf(en) + 1)}</span>
+  return `<section class="entry" data-entry="${en.id}">
+    <div class="ehead">
+      <a class="ename" href="#/e/${ex.id}">${esc(ex.name)}</a>
       <button class="icon" data-act="entry-menu" aria-label="Options de l'exercice">${I.dots}</button>
     </div>
-    <a class="ename" href="#/e/${ex.id}">${esc(ex.name)}</a>
-    ${en.sets.length ? '<div class="sgrid shead"><span class="micro">Série</span><span class="micro">Kg</span><span class="micro">Rép</span><span></span></div>' : ''}
     ${rows}
-    <button class="addset" data-act="add-set">${I.plus}<span class="label">Série</span></button>
+    <button class="addset" data-act="add-set">${I.plus}<span>série</span></button>
   </section>`;
 }
 
@@ -343,34 +318,22 @@ function setOf(el) {
 function renderExercise(ex) {
   cur = { view: 'exercise', exercise: ex };
   let best = null;
-  let last = null;
   const rows = [];
   for (const s of sortedSessions()) {
     const sets = s.entries.filter(en => en.exerciseId === ex.id).flatMap(en => en.sets.filter(logged));
     if (!sets.length) continue;
-    last = last || s;
     const t = topSet(sets);
     if (!best || heavier(t, best)) best = t;
     rows.push(`<a class="hrow" href="#/s/${s.id}">
-      <span class="micro">${esc(dayMonth(s.date))}</span>
+      <span class="hdate">${shortDate(s.date)}</span>
       <span class="hsets">${sets.map(st => `<span>${esc(fmtSet(st))}</span>`).join('')}</span>
     </a>`);
   }
   app.innerHTML = `
-    <header class="bar">${backBtn('/')}<button class="icon" data-act="exercise-menu" aria-label="Options de l'exercice">${I.dots}</button></header>
-    <section class="panel">
-      <div class="phead"><span class="label">Exercice</span><span class="micro">${pad(rows.length)} séance${rows.length > 1 ? 's' : ''}</span></div>
-      <h1 class="title">${esc(ex.name)}</h1>
-    </section>
-    ${rows.length ? `
-    <section class="panel split">
-      <div><span class="micro">Record</span><span class="stat">${recordHTML(best)}</span></div>
-      <div><span class="micro">Dernière fois</span><span class="stat">${esc(dayMonth(last.date))}</span></div>
-    </section>
-    <section class="panel list">
-      <div class="phead"><span class="label">Historique</span></div>
-      ${rows.join('')}
-    </section>` : '<section class="panel"><span class="micro">Aucune série enregistrée</span></section>'}`;
+    <header class="top">${backBtn('/')}<button class="icon" data-act="exercise-menu" aria-label="Options de l'exercice">${I.dots}</button></header>
+    <h1>${esc(ex.name)}</h1>
+    <p class="record">${best ? `record<b>${esc(fmtRecord(best))}</b>` : 'aucune série'}</p>
+    ${rows.join('')}`;
 }
 
 /* ---------- Feuilles ---------- */
@@ -384,12 +347,12 @@ function sheet(opts) {
   root.innerHTML = `<div class="sheet-wrap">
     <div class="backdrop" data-act="sheet-close"></div>
     <div class="sheet" role="dialog" aria-modal="true">
-      ${opts.title ? `<div class="sheet-head"><span class="label">${esc(opts.title)}</span></div>` : ''}
+      ${opts.title ? `<p class="sheet-title">${esc(opts.title)}</p>` : ''}
       ${opts.message ? `<p class="sheet-msg">${esc(opts.message)}</p>` : ''}
       ${opts.input ? `<div class="sheet-field"><input class="sheet-input" value="${esc(opts.input.value || '')}" placeholder="${esc(opts.input.placeholder || '')}" autocomplete="off" autocorrect="off" autocapitalize="sentences" enterkeyhint="done"></div><div class="sugg" id="sugg"></div>` : ''}
       ${(opts.actions || []).map((a, i) => `<button class="sheet-row${a.danger ? ' danger' : ''}" data-act="sheet-do" data-i="${i}">${esc(a.label)}</button>`).join('')}
-      ${opts.submit ? `<button class="block" data-act="sheet-submit"><span>${esc(opts.submit.label)}</span>${I.plus}</button>` : ''}
-      <button class="sheet-row cancel" data-act="sheet-close">${esc(opts.cancel || 'Annuler')}</button>
+      ${opts.submit ? `<button class="go" data-act="sheet-submit">${esc(opts.submit.label)}</button>` : ''}
+      <button class="sheet-row cancel" data-act="sheet-close">${esc(opts.cancel || 'annuler')}</button>
     </div>
   </div>`;
   const wrap = root.firstElementChild;
@@ -417,7 +380,7 @@ function runSheetAction(i) {
   const a = sheetState?.actions?.[i];
   if (!a) return;
   if (a.confirm) {
-    sheet({ title: a.label, message: a.confirm, actions: [{ label: a.confirmLabel || a.label, danger: true, run: a.run }] });
+    sheet({ message: a.confirm, actions: [{ label: a.confirmLabel || a.label, danger: true, run: a.run }] });
     return;
   }
   closeSheet();
@@ -445,15 +408,9 @@ function paintSuggestions(q) {
 /* ---------- Minuteur ---------- */
 
 const timerEl = $('#timer');
-const tMin = $('#tmin');
-const tSec = $('#tsec');
-const tSign = $('#tsign');
-const tState = $('#tstate');
+const tClock = $('#tclock');
 const tGo = $('#tgo');
-const meter = $('#meter');
-meter.innerHTML = '<i></i>'.repeat(BARS);
-const bars = [...meter.children];
-let litBars = -1;
+const tProg = $('.tprog');
 let actx = null;
 let wakeLock = null;
 
@@ -532,20 +489,11 @@ function paintTimer() {
   const rem = run ? timer.remaining() : db.settings.rest * 1000;
   const over = run && rem <= 0;
   const secs = over ? Math.floor(-rem / 1000) : Math.ceil(rem / 1000);
-  const m = pad(Math.floor(secs / 60));
-  const s = pad(secs % 60);
-  if (tMin.textContent !== m) tMin.textContent = m;
-  if (tSec.textContent !== s) tSec.textContent = s;
-  tSign.hidden = !over;
-  tState.textContent = over ? 'Terminé' : run ? 'Restant' : 'Prêt';
+  const text = `${over ? '+' : ''}${Math.floor(secs / 60)}:${pad(secs % 60)}`;
+  if (tClock.textContent !== text) tClock.textContent = text;
+  tProg.style.transform = `scaleX(${run && !over ? Math.min(1, rem / (timer.dur * 1000)) : 0})`;
   timerEl.classList.toggle('run', run);
   timerEl.classList.toggle('over', over);
-
-  const lit = over ? BARS : run ? Math.round((1 - rem / (timer.dur * 1000)) * BARS) : 0;
-  if (lit !== litBars) {
-    bars.forEach((b, i) => b.classList.toggle('on', i < lit));
-    litBars = lit;
-  }
 
   const state = run ? 'stop' : 'play';
   if (tGo.dataset.state !== state) {
@@ -625,15 +573,14 @@ $('#file').addEventListener('change', async e => {
   if (!f) return;
   let data;
   try { data = normalize(JSON.parse(await f.text())); } catch {
-    sheet({ title: 'Importer', message: 'Ce fichier est illisible.', cancel: 'OK' });
+    sheet({ message: 'fichier illisible', cancel: 'ok' });
     return;
   }
   const n = data.sessions.length;
   sheet({
-    title: 'Importer',
-    message: `Remplacer toutes les données par ce fichier (${n} séance${n > 1 ? 's' : ''}) ?`,
+    message: `remplacer toutes les données par ce fichier (${n} séance${n > 1 ? 's' : ''}) ?`,
     actions: [{
-      label: 'Remplacer',
+      label: 'remplacer',
       danger: true,
       run: () => { db = data; pruneExercises(); flush(); timer.stop(); replace('/'); route(); },
     }],
@@ -653,10 +600,9 @@ const actions = {
   },
 
   'add-exercise': () => sheet({
-    title: 'Exercice',
-    input: { placeholder: "Nom de l'exercice", suggest: matchExercises },
+    input: { placeholder: "nom de l'exercice", suggest: matchExercises },
     submit: {
-      label: 'Ajouter',
+      label: 'ajouter',
       run: name => {
         const en = addEntry(cur.session, createExercise(name).id);
         save();
@@ -700,14 +646,14 @@ const actions = {
     const i = s.entries.indexOf(en);
     const move = d => () => { s.entries.splice(i, 1); s.entries.splice(i + d, 0, en); save(); renderSession(s); };
     const list = [];
-    if (en.sets.length) list.push({ label: 'Supprimer la dernière série', run: () => { en.sets.pop(); save(); repaintEntry(en); } });
-    if (i > 0) list.push({ label: 'Monter', run: move(-1) });
-    if (i < s.entries.length - 1) list.push({ label: 'Descendre', run: move(1) });
+    if (en.sets.length) list.push({ label: 'supprimer la dernière série', run: () => { en.sets.pop(); save(); repaintEntry(en); } });
+    if (i > 0) list.push({ label: 'monter', run: move(-1) });
+    if (i < s.entries.length - 1) list.push({ label: 'descendre', run: move(1) });
     list.push({
-      label: "Retirer l'exercice",
+      label: "retirer l'exercice",
       danger: true,
-      confirm: en.sets.some(logged) ? `Retirer ${exName(en.exerciseId)} et ses séries de cette séance ?` : null,
-      confirmLabel: 'Retirer',
+      confirm: en.sets.some(logged) ? `retirer ${exName(en.exerciseId)} et ses séries de cette séance ?` : null,
+      confirmLabel: 'retirer',
       run: () => { s.entries.splice(s.entries.indexOf(en), 1); save(); renderSession(s); },
     });
     sheet({ title: exName(en.exerciseId), actions: list });
@@ -716,10 +662,9 @@ const actions = {
   'session-menu': () => {
     const s = cur.session;
     sheet({
-      title: 'Séance',
       actions: [
         {
-          label: 'Refaire cette séance',
+          label: 'refaire cette séance',
           run: () => {
             const n = newSession();
             n.name = s.name;
@@ -730,10 +675,10 @@ const actions = {
           },
         },
         {
-          label: 'Supprimer la séance',
+          label: 'supprimer la séance',
           danger: true,
-          confirm: 'Supprimer cette séance et toutes ses séries ?',
-          confirmLabel: 'Supprimer',
+          confirm: 'supprimer cette séance et toutes ses séries ?',
+          confirmLabel: 'supprimer',
           run: () => { db.sessions = db.sessions.filter(x => x !== s); save(); back('/'); },
         },
       ],
@@ -747,18 +692,17 @@ const actions = {
       title: ex.name,
       actions: [
         {
-          label: 'Renommer',
+          label: 'renommer',
           run: () => sheet({
-            title: 'Renommer',
-            input: { value: ex.name, placeholder: "Nom de l'exercice" },
-            submit: { label: 'Enregistrer', run: v => { ex.name = clean(v); save(); route(); } },
+            input: { value: ex.name, placeholder: "nom de l'exercice" },
+            submit: { label: 'enregistrer', run: v => { ex.name = clean(v); save(); route(); } },
           }),
         },
         {
-          label: "Supprimer l'exercice",
+          label: "supprimer l'exercice",
           danger: true,
-          confirm: `Supprimer ${ex.name} de ${used > 1 ? `ses ${used} séances` : 'sa séance'}, avec toutes ses séries ?`,
-          confirmLabel: 'Supprimer',
+          confirm: `supprimer ${ex.name} de ${used > 1 ? `ses ${used} séances` : 'sa séance'}, avec toutes ses séries ?`,
+          confirmLabel: 'supprimer',
           run: () => {
             db.exercises = db.exercises.filter(x => x !== ex);
             for (const s of db.sessions) s.entries = s.entries.filter(en => en.exerciseId !== ex.id);
@@ -771,11 +715,11 @@ const actions = {
   },
 
   'app-menu': () => sheet({
-    title: 'Sauvegarde',
-    message: 'Les données restent sur ce téléphone. Exportez-les de temps en temps.',
+    title: 'sauvegarde',
+    message: 'les données restent sur ce téléphone.',
     actions: [
-      { label: 'Exporter', run: exportData },
-      { label: 'Importer', run: () => $('#file').click() },
+      { label: 'exporter', run: exportData },
+      { label: 'importer', run: () => $('#file').click() },
     ],
   }),
 

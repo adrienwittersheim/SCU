@@ -1,14 +1,12 @@
 // Hors ligne : l'app est servie depuis le cache de sa version.
 // Changer VERSION à chaque publication : l'app se met à jour au lancement suivant.
-const VERSION = 'scu-v2';
+const VERSION = 'scu-v3';
 const ASSETS = [
   './',
   'index.html',
   'style.css',
   'app.js',
   'manifest.webmanifest',
-  'fonts/roboto-condensed-500.woff2',
-  'fonts/roboto-condensed-700.woff2',
   'icons/icon.svg',
   'icons/icon-192.png',
   'icons/icon-512.png',
