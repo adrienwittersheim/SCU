@@ -451,12 +451,111 @@ function paintSuggestions(q) {
 
 /* ---------- Molettes ---------- */
 
+// Molettes dessinées à la main (glisser, lancer, toucher une valeur) : le défilement
+// natif d'iOS dans une feuille est saccadé et se mélange à celui de la page.
+const wheels = new WeakMap();
 const wheelHTML = (name, labels, sel) => `<div class="wheel ${name}" data-sel="${sel}">
-  <div class="wpad"></div>${labels.map((l, i) => `<div class="witem${i === sel ? ' on' : ''}">${l}</div>`).join('')}<div class="wpad"></div>
+  <div class="wlist">${labels.map((l, i) => `<div class="witem${i === sel ? ' on' : ''}">${l}</div>`).join('')}</div>
 </div>`;
-const wheelIndex = w => clamp(Math.round(w.scrollTop / ROW), 0, w.children.length - 3);
-const mountWheels = wrap => wrap.querySelectorAll('.wheel').forEach(el => { el.scrollTop = Number(el.dataset.sel) * ROW; });
-const readWheels = () => [...document.querySelectorAll('#sheet .wheel')].map(wheelIndex);
+
+function mountWheels(wrap) {
+  wrap.querySelectorAll('.wheel').forEach(el => {
+    const list = el.firstElementChild;
+    const w = { el, list, n: list.children.length, pos: Number(el.dataset.sel), sel: Number(el.dataset.sel), target: null, anim: 0 };
+    wheels.set(el, w);
+    paintWheel(w);
+  });
+}
+
+function paintWheel(w) {
+  w.list.style.transform = `translate3d(0, ${2 * ROW - w.pos * ROW}px, 0)`;
+  const i = clamp(Math.round(w.pos), 0, w.n - 1);
+  if (i !== w.sel) {
+    w.list.children[w.sel].classList.remove('on');
+    w.list.children[i].classList.add('on');
+    w.sel = i;
+  }
+}
+
+// Amène la molette sur un cran, en ralentissant.
+function settle(w, to) {
+  cancelAnimationFrame(w.anim);
+  w.target = clamp(Math.round(to), 0, w.n - 1);
+  const from = w.pos;
+  const d = w.target - from;
+  const dur = clamp(160 + Math.sqrt(Math.abs(d)) * 90, 160, 900);
+  const t0 = performance.now();
+  const step = now => {
+    const k = Math.min(1, (now - t0) / dur);
+    w.pos = from + d * (1 - (1 - k) ** 3);
+    paintWheel(w);
+    if (k < 1) w.anim = requestAnimationFrame(step);
+    else w.target = null;
+  };
+  w.anim = requestAnimationFrame(step);
+}
+
+const readWheels = () => [...document.querySelectorAll('#sheet .wheel')].map(el => {
+  const w = wheels.get(el);
+  return w.target ?? w.sel;
+});
+
+let wdrag = null;
+
+document.addEventListener('pointerdown', e => {
+  const el = e.target.closest('.wheel');
+  const w = el && wheels.get(el);
+  if (!w || e.button > 0) return;
+  cancelAnimationFrame(w.anim);
+  w.target = null;
+  el.setPointerCapture?.(e.pointerId);
+  wdrag = { w, id: e.pointerId, y: e.clientY, pos: w.pos, moved: false, track: [[e.timeStamp, e.clientY]] };
+});
+
+document.addEventListener('pointermove', e => {
+  if (!wdrag || e.pointerId !== wdrag.id) return;
+  const { w } = wdrag;
+  const dy = e.clientY - wdrag.y;
+  if (Math.abs(dy) > 4) wdrag.moved = true;
+  let p = wdrag.pos - dy / ROW;
+  if (p < 0) p /= 3;                              // résistance aux extrémités
+  if (p > w.n - 1) p = w.n - 1 + (p - w.n + 1) / 3;
+  w.pos = p;
+  paintWheel(w);
+  wdrag.track.push([e.timeStamp, e.clientY]);
+  if (wdrag.track.length > 6) wdrag.track.shift();
+});
+
+function endWheel(e) {
+  if (!wdrag || e.pointerId !== wdrag.id) return;
+  const { w, moved, track } = wdrag;
+  wdrag = null;
+  if (!moved) {
+    // Toucher une valeur : la molette s'y place.
+    const r = w.el.getBoundingClientRect();
+    settle(w, w.pos + (e.clientY - r.top - r.height / 2) / ROW);
+    return;
+  }
+  const [t0, y0] = track[0];
+  const [t1, y1] = track[track.length - 1];
+  const v = t1 - t0 > 0 && e.timeStamp - t1 < 80 ? (y1 - y0) / (t1 - t0) : 0; // px/ms
+  settle(w, w.pos - (v * 260) / ROW);
+}
+document.addEventListener('pointerup', endWheel);
+document.addEventListener('pointercancel', endWheel);
+
+// Molette de souris ou pavé tactile sur ordinateur.
+document.addEventListener('wheel', e => {
+  const el = e.target.closest?.('.wheel');
+  const w = el && wheels.get(el);
+  if (!w) return;
+  e.preventDefault();
+  cancelAnimationFrame(w.anim);
+  w.pos = clamp(w.pos + e.deltaY / ROW, 0, w.n - 1);
+  paintWheel(w);
+  clearTimeout(w.idle);
+  w.idle = setTimeout(() => settle(w, w.pos), 90);
+}, { passive: false });
 
 // Charge et répétitions d'une série ; « then » s'exécute après validation.
 function editSet(en, i, then) {
@@ -519,67 +618,141 @@ function editTarget(en) {
   });
 }
 
-// La valeur au centre de la molette s'affiche en noir.
-document.addEventListener('scroll', e => {
-  const w = e.target;
-  if (!w.classList?.contains('wheel')) return;
-  const i = wheelIndex(w);
-  if (w._sel === i) return;
-  w._sel = i;
-  w.querySelector('.witem.on')?.classList.remove('on');
-  w.children[i + 1].classList.add('on');
-}, true);
+/* ---------- Gestes : glisser pour supprimer, appui long pour réordonner ---------- */
 
-/* ---------- Glisser pour supprimer une série ---------- */
-
-let drag = null;
-let swallowClick = false;
+const HOLD = 420;                // durée de l'appui long, en ms
+let g = null;
+let swallowUntil = 0;
 let toastUndo = null;
 let toastTimer = 0;
 
 document.addEventListener('pointerdown', e => {
+  if (g || e.button > 0 || e.target.closest('.wheel, .sheet-wrap')) return;
   const face = e.target.closest('.set-face');
-  if (!face || drag || e.button > 0) return;
-  drag = { face, row: face.closest('.set'), x: e.clientX, y: e.clientY, id: e.pointerId, on: false };
+  const head = !face && e.target.closest('.ehead');
+  if (!face && !head) return;
+  g = {
+    kind: face ? 'set' : 'entry',
+    face,
+    item: face ? face.closest('.set') : head.closest('.entry'),
+    id: e.pointerId,
+    x: e.clientX,
+    y: e.clientY,
+    mode: 'wait',
+  };
+  g.timer = setTimeout(startSort, HOLD);
 });
 
 document.addEventListener('pointermove', e => {
-  if (!drag || e.pointerId !== drag.id) return;
-  const dx = e.clientX - drag.x;
-  const dy = e.clientY - drag.y;
-  if (!drag.on) {
-    if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { drag = null; return; }
-    if (dx > -10 || Math.abs(dx) < Math.abs(dy)) return;
-    drag.on = true;
-    drag.face.setPointerCapture?.(e.pointerId);
-    drag.row.classList.add('swiping');
+  if (!g || e.pointerId !== g.id) return;
+  const dx = e.clientX - g.x;
+  const dy = e.clientY - g.y;
+  if (g.mode === 'wait') {
+    if (Math.hypot(dx, dy) < 10) return;
+    clearTimeout(g.timer);
+    if (g.kind !== 'set' || dx > 0 || Math.abs(dx) < Math.abs(dy)) { g = null; return; }
+    g.mode = 'swipe';
+    g.face.setPointerCapture?.(g.id);
+    g.item.classList.add('swiping');
   }
+  if (g.mode === 'sort') { moveSort(e.clientY); return; }
   const x = Math.min(0, dx);
-  drag.face.style.transform = `translateX(${x}px)`;
-  const armed = -x > Math.min(140, drag.row.offsetWidth * 0.4);
-  if (armed !== drag.row.classList.contains('armed')) {
-    drag.row.classList.toggle('armed', armed);
+  g.face.style.transform = `translateX(${x}px)`;
+  const armed = -x > Math.min(140, g.item.offsetWidth * 0.4);
+  if (armed !== g.item.classList.contains('armed')) {
+    g.item.classList.toggle('armed', armed);
     if (armed) navigator.vibrate?.(8);
   }
 });
 
-function endDrag(e) {
-  if (!drag || e.pointerId !== drag.id) return;
-  const { face, row, on } = drag;
-  drag = null;
-  if (!on) return;
-  swallowClick = true;
-  setTimeout(() => { swallowClick = false; }, 0);
-  row.classList.remove('swiping');
-  if (e.type === 'pointerup' && row.classList.contains('armed')) {
-    deleteSet(row);
+function endGesture(e) {
+  if (!g || e.pointerId !== g.id) return;
+  const s = g;
+  g = null;
+  clearTimeout(s.timer);
+  if (s.mode === 'wait') return;
+  swallowUntil = Date.now() + 400;
+  if (s.mode === 'sort') { finishSort(s); return; }
+  s.item.classList.remove('swiping');
+  if (e.type === 'pointerup' && s.item.classList.contains('armed')) {
+    deleteSet(s.item);
   } else {
-    face.style.transform = '';
-    row.classList.remove('armed');
+    s.face.style.transform = '';
+    s.item.classList.remove('armed');
   }
 }
-document.addEventListener('pointerup', endDrag);
-document.addEventListener('pointercancel', endDrag);
+document.addEventListener('pointerup', endGesture);
+document.addEventListener('pointercancel', endGesture);
+
+// Pendant un geste (et dans les feuilles), la page ne défile pas.
+document.addEventListener('touchmove', e => {
+  if ((g && g.mode !== 'wait') || wdrag || e.target.closest?.('.sheet-wrap')) e.preventDefault();
+}, { passive: false });
+
+// Appui long : la série, ou l'exercice (la liste se replie sur les noms), suit le doigt.
+function startSort() {
+  const s = g;
+  if (!s || s.mode !== 'wait') return;
+  s.mode = 'sort';
+  (s.face || s.item).setPointerCapture?.(s.id);
+  navigator.vibrate?.(15);
+  if (s.kind === 'entry') app.classList.add('sorting');
+  s.list = [...s.item.parentElement.querySelectorAll(s.kind === 'set' ? ':scope > .set' : ':scope > .entry')];
+  s.from = s.to = s.list.indexOf(s.item);
+  s.rects = s.list.map(el => { const r = el.getBoundingClientRect(); return { top: r.top + scrollY, h: r.height }; });
+  const n = s.rects.length;
+  s.step = n > 1 ? (s.rects[n - 1].top - s.rects[0].top) / (n - 1) : 0;
+  const r = s.rects[s.from];
+  s.grab = s.kind === 'set' ? s.y + scrollY - (r.top + r.h / 2) : 0;
+  s.item.classList.add('lifted');
+  moveSort(s.y);
+  s.raf = requestAnimationFrame(autoScroll);
+}
+
+function moveSort(y) {
+  const s = g;
+  s.lastY = y;
+  const r = s.rects[s.from];
+  const center = y + scrollY - s.grab;
+  s.item.style.transform = `translate3d(0, ${center - (r.top + r.h / 2)}px, 0)`;
+  let to = 0;
+  s.rects.forEach((q, j) => { if (j !== s.from && q.top + q.h / 2 < center) to++; });
+  if (to === s.to) return;
+  s.to = to;
+  s.list.forEach((el, j) => {
+    if (j === s.from) return;
+    const shift = s.from < to && j > s.from && j <= to ? -s.step : s.from > to && j >= to && j < s.from ? s.step : 0;
+    el.style.transform = shift ? `translate3d(0, ${shift}px, 0)` : '';
+  });
+  navigator.vibrate?.(5);
+}
+
+// Près des bords, la page défile pour atteindre le reste de la liste.
+function autoScroll() {
+  const s = g;
+  if (!s || s.mode !== 'sort') return;
+  const edge = 90;
+  const bottom = innerHeight - (timerEl.hidden ? 0 : timerEl.offsetHeight) - edge;
+  const v = s.lastY < edge ? (s.lastY - edge) / 5 : s.lastY > bottom ? (s.lastY - bottom) / 5 : 0;
+  if (v) { scrollBy(0, v); moveSort(s.lastY); }
+  s.raf = requestAnimationFrame(autoScroll);
+}
+
+function finishSort(s) {
+  cancelAnimationFrame(s.raf);
+  const en = s.kind === 'set' ? entryOf(s.item) : null;
+  const list = en ? en.sets : cur.session.entries;
+  const moved = list[s.from];
+  if (s.to !== s.from) {
+    list.splice(s.from, 1);
+    list.splice(s.to, 0, moved);
+    save();
+  }
+  app.classList.remove('sorting');
+  if (en) { repaintEntry(en); return; }
+  renderSession(cur.session);
+  $(`[data-entry="${moved.id}"]`)?.scrollIntoView({ block: 'center' });
+}
 
 function deleteSet(row) {
   const en = entryOf(row);
@@ -865,11 +1038,7 @@ const actions = {
   'entry-menu': el => {
     const s = cur.session;
     const en = entryOf(el);
-    const i = s.entries.indexOf(en);
-    const move = d => () => { s.entries.splice(i, 1); s.entries.splice(i + d, 0, en); save(); renderSession(s); };
     const list = [{ label: 'objectif', run: () => editTarget(en) }];
-    if (i > 0) list.push({ label: 'monter', run: move(-1) });
-    if (i < s.entries.length - 1) list.push({ label: 'descendre', run: move(1) });
     list.push({
       label: "retirer l'exercice",
       danger: true,
@@ -954,13 +1123,7 @@ const actions = {
 };
 
 document.addEventListener('click', e => {
-  if (swallowClick) { swallowClick = false; e.preventDefault(); return; }
-  const item = e.target.closest('.witem');
-  if (item) {
-    const w = item.parentElement;
-    w.scrollTo({ top: ([...w.children].indexOf(item) - 1) * ROW, behavior: 'smooth' });
-    return;
-  }
+  if (Date.now() < swallowUntil) { e.preventDefault(); return; }
   const el = e.target.closest('[data-act]');
   if (el && actions[el.dataset.act]) actions[el.dataset.act](el, e);
 });

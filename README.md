@@ -6,6 +6,7 @@ Carnet de musculation pour téléphone. Séances, exercices, séries, charges �
 - **Série** : toucher les chiffres ouvre des molettes (kg, décimale, répétitions) ; changer la charge d'une série change aussi les suivantes. Toucher le rond valide la série et lance le repos. Les coches s'effacent d'elles-mêmes le lendemain.
 - **Objectif** (`···` → objectif) : séries × fourchette de répétitions, par exemple `3 × 8–10`. Quand toutes les séries de la dernière fois ont atteint le haut de la fourchette, **↑ monter** s'affiche jusqu'à ce qu'une charge plus lourde soit choisie.
 - Glisser une série vers la gauche la supprime (avec « annuler »).
+- Appui long sur une série ou sur le nom d'un exercice, puis glisser : pour les réordonner.
 - **Repos** : `−` / `+` (15 s) règlent la durée par défaut à l'arrêt, ou le décompte en cours. Vibration et bip à la fin, écran maintenu allumé pendant le repos.
 - Toucher le nom d'un exercice affiche son historique et son record (séries validées).
 - Hors ligne. Aucune dépendance, aucun compte, aucun serveur : les données restent sur le téléphone. `···` en haut de l'accueil → exporter / importer une sauvegarde.

@@ -197,6 +197,16 @@ h1 {
 .addex svg { width: 18px; height: 18px; }
 .addex:active { background: var(--key-down); }
 
+/* Appui long : réordonner. */
+.set, .entry { transition: transform .18s ease, height .2s ease; }
+.lifted { position: relative; z-index: 4; background: var(--bg); box-shadow: 0 10px 30px rgba(0, 0, 0, .14); transition: none; }
+.entry.lifted { margin-left: -14px; margin-right: -14px; padding-left: 14px; padding-right: 14px; border-radius: 14px; }
+.lifted .ename { opacity: 1; }
+#app.sorting .entry { margin-top: 0; padding: 14px 0; border-top: 1px solid var(--line); }
+#app.sorting .entry .set, #app.sorting .entry .addset, #app.sorting .target, #app.sorting .ehead .icon { display: none; }
+#app.sorting .ehead { margin: 0; }
+#app.sorting .addex { margin-top: 24px; }
+
 /* — Exercice — */
 
 .record { margin: 8px 0 28px; color: var(--grey); font-size: 15px; }
@@ -246,7 +256,7 @@ h1 {
 
 /* — Feuilles — */
 
-.sheet-wrap { position: fixed; inset: 0; z-index: 20; }
+.sheet-wrap { position: fixed; inset: 0; z-index: 20; touch-action: none; overscroll-behavior: contain; }
 .backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, .25); opacity: 0; transition: opacity .2s; }
 .sheet {
   position: absolute;
@@ -320,21 +330,28 @@ h1 {
 .wheel {
   position: relative;
   height: 220px;
-  overflow-y: scroll;
-  overscroll-behavior: contain;
-  scroll-snap-type: y mandatory;
-  scrollbar-width: none;
-  -webkit-mask-image: linear-gradient(transparent, #000 32%, #000 68%, transparent);
-  mask-image: linear-gradient(transparent, #000 32%, #000 68%, transparent);
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
 }
-.wheel::-webkit-scrollbar { display: none; }
-.wpad { height: 88px; }
+/* Fondu en haut et en bas, posé par-dessus : moins coûteux qu'un masque. */
+.wheel::before, .wheel::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  height: 80px;
+  pointer-events: none;
+}
+.wheel::before { top: 0; background: linear-gradient(var(--bg), rgba(255, 255, 255, 0)); }
+.wheel::after { bottom: 0; background: linear-gradient(rgba(255, 255, 255, 0), var(--bg)); }
+.wlist { will-change: transform; }
 .witem {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   height: 44px;
-  scroll-snap-align: center;
   font: 500 24px/1 var(--mono);
   letter-spacing: -.02em;
   color: var(--faint);
