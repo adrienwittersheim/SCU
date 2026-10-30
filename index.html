@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#EEEDE9" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F2EDE8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)">
 <meta name="description" content="Séances, exercices, séries, charges.">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -15,24 +15,32 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preload" href="fonts/roboto-condensed-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/roboto-condensed-500.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="style.css">
 <script src="app.js" defer></script>
 </head>
 <body>
 <main id="app"></main>
 
-<div id="timer" class="timer" hidden>
-  <div class="tprog"></div>
-  <div class="tbar">
-    <div class="tread">
-      <span class="label">Repos</span>
-      <span class="ttime" id="ttime" role="timer">1:30</span>
-    </div>
-    <button class="tadj" data-act="t-minus" aria-label="Moins 15 secondes">−15</button>
-    <button class="tadj" data-act="t-plus" aria-label="Plus 15 secondes">+15</button>
-    <button class="tgo" id="tgo" data-act="t-toggle" aria-label="Démarrer"></button>
+<section id="timer" class="timer" hidden aria-label="Minuteur de repos">
+  <div class="thead">
+    <span class="label">Repos</span>
+    <span class="micro tstate"><svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6 3.4V6l1.7 1.1" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg><span id="tstate">Prêt</span></span>
   </div>
-</div>
+  <div class="tmain">
+    <div class="tclock" role="timer">
+      <span class="tsign" id="tsign" hidden>+</span>
+      <span class="tunit"><i class="micro">Min</i><b id="tmin">01</b></span>
+      <span class="tsep">:</span>
+      <span class="tunit"><i class="micro">Sec</i><b id="tsec">30</b></span>
+    </div>
+    <button class="pill" data-act="t-minus" aria-label="Moins 15 secondes">−15</button>
+    <button class="pill" data-act="t-plus" aria-label="Plus 15 secondes">+15</button>
+    <button class="tgo" id="tgo" data-act="t-toggle" aria-label="Démarrer le repos"></button>
+  </div>
+  <div class="meter" id="meter" aria-hidden="true"></div>
+</section>
 
 <div id="sheet"></div>
 <input type="file" id="file" accept="application/json,.json" hidden>

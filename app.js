@@ -8,21 +8,14 @@ const TIMER_KEY = 'scu.timer';
 const STEP = 15;                 // pas du minuteur, en secondes
 const REST_MAX = 600;
 const OVERTIME = 10 * 60 * 1000; // le dépassement s'affiche 10 min au plus
-
-const SEED = [
-  'Squat', 'Soulevé de terre', 'Développé couché', 'Développé incliné', 'Développé militaire',
-  'Rowing barre', 'Tractions', 'Tirage vertical', 'Dips', 'Presse à cuisses', 'Fentes',
-  'Hip thrust', 'Leg curl', 'Leg extension', 'Élévations latérales', 'Curl biceps',
-  'Extension triceps', 'Mollets',
-];
+const BARS = 48;                 // segments du vumètre
 
 const I = {
-  more: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>',
-  back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
-  check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12.5 4 4 8-9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 6.2v11.6a.8.8 0 0 0 1.2.7l9.3-5.8a.8.8 0 0 0 0-1.4L9.7 5.5a.8.8 0 0 0-1.2.7z"/></svg>',
-  stop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>',
+  dots: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="10.25" width="3.5" height="3.5"/><rect x="10.25" y="10.25" width="3.5" height="3.5"/><rect x="17.5" y="10.25" width="3.5" height="3.5"/></svg>',
+  back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4.5 7.5 12l7.5 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="square"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 12h16" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+  play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15L19.5 12z"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12"/></svg>',
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -36,6 +29,7 @@ const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())
 const today = () => iso(new Date());
 const parseISO = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+const clean = s => cap(s.trim().replace(/\s+/g, ' '));
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fold = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -46,26 +40,29 @@ const parseNum = str => { const t = str.trim().replace(',', '.'); return t ? num
 const logged = st => st.r != null; // une série compte dès qu'elle a des répétitions
 const clampRest = v => (Number(v) > 0 ? Math.min(REST_MAX, Math.max(STEP, Math.round(v / STEP) * STEP)) : 90);
 
-const thisYear = () => new Date().getFullYear();
-const dfMonth = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' });
 const dfWeekday = new Intl.DateTimeFormat('fr-FR', { weekday: 'short' });
-const dfLong = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-const dfLongY = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-const dfShort = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short' });
-const dfShortY = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
-const longDate = s => { const d = parseISO(s); return cap((d.getFullYear() === thisYear() ? dfLong : dfLongY).format(d)); };
-const shortDate = s => { const d = parseISO(s); return (d.getFullYear() === thisYear() ? dfShort : dfShortY).format(d); };
+function dayMonth(s) {
+  const d = parseISO(s);
+  const y = d.getFullYear() === new Date().getFullYear() ? '' : '.' + String(d.getFullYear()).slice(2);
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}${y}`;
+}
+const stamp = s => `${dfWeekday.format(parseISO(s)).replace('.', '')} ${dayMonth(s)}`;
 
-function fmtSet(st) {
-  if (!st.w) return st.r == null ? '–' : `${st.r} rép.`;
-  return `${fmt(st.w)}×${st.r ?? '–'}`;
-}
-function fmtRecord(st) {
-  if (!st.w) return `${st.r ?? 0} rép.`;
-  return `${fmt(st.w)} kg × ${st.r ?? '–'}`;
-}
-const heavier = (a, b) => (a.w ?? 0) > (b.w ?? 0) || ((a.w ?? 0) === (b.w ?? 0) && (a.r ?? 0) > (b.r ?? 0));
+const fmtSet = st => (st.w ? `${fmt(st.w)}×${st.r}` : `${st.r} rép`);
+const recordHTML = st => (st.w ? `${fmt(st.w)}<small>kg</small> × ${st.r}` : `${st.r}<small>rép</small>`);
+const heavier = (a, b) => (a.w ?? 0) > (b.w ?? 0) || ((a.w ?? 0) === (b.w ?? 0) && a.r > b.r);
 const topSet = sets => sets.reduce((best, st) => (heavier(st, best) ? st : best));
+
+// Retour haptique : vibreur sur Android, interrupteur natif sur iPhone (iOS 18+).
+const haptic = (() => {
+  if (navigator.vibrate) return () => navigator.vibrate(12);
+  const label = document.createElement('label');
+  label.setAttribute('aria-hidden', 'true');
+  label.style.cssText = 'position:fixed;left:-99px;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none';
+  label.innerHTML = '<input type="checkbox" switch tabindex="-1">';
+  document.body.append(label);
+  return () => label.click();
+})();
 
 /* ---------- Données ---------- */
 
@@ -73,7 +70,7 @@ let db = load();
 let saveTimer = 0;
 
 function blank() {
-  return { version: 1, exercises: SEED.map(name => ({ id: uid(), name })), sessions: [], settings: { rest: 90 } };
+  return { version: 1, exercises: [], sessions: [], settings: { rest: 90 } };
 }
 
 function load() {
@@ -127,9 +124,21 @@ const exName = id => (exById(id) || { name: '?' }).name;
 const order = s => `${s.date}|${String(s.createdAt).padStart(15, '0')}`;
 const sortedSessions = () => [...db.sessions].sort((a, b) => cmp(order(b), order(a)));
 const blankSets = n => Array.from({ length: n }, () => ({ w: null, r: null, done: false }));
+const newSession = () => ({ id: uid(), date: today(), createdAt: Date.now(), name: '', entries: [] });
 
-function newSession() {
-  return { id: uid(), date: today(), createdAt: Date.now(), name: '', entries: [] };
+// Numéro de chaque séance, dans l'ordre chronologique.
+function numbers() {
+  const m = new Map();
+  [...db.sessions].sort((a, b) => cmp(order(a), order(b))).forEach((s, i) => m.set(s.id, i + 1));
+  return m;
+}
+
+// Un exercice n'existe que tant qu'une séance l'utilise.
+function pruneExercises() {
+  const used = new Set(db.sessions.flatMap(s => s.entries.map(en => en.exerciseId)));
+  const n = db.exercises.length;
+  db.exercises = db.exercises.filter(e => used.has(e.id));
+  if (db.exercises.length !== n) save();
 }
 
 // Les séances ouvertes puis laissées vides disparaissent d'elles-mêmes.
@@ -137,6 +146,16 @@ function prune() {
   const n = db.sessions.length;
   db.sessions = db.sessions.filter(s => s.entries.length || s.name.trim());
   if (db.sessions.length !== n) save();
+  pruneExercises();
+}
+
+function lastUsed() {
+  const m = new Map();
+  for (const s of db.sessions) {
+    const k = order(s);
+    for (const en of s.entries) if (k > (m.get(en.exerciseId) || '')) m.set(en.exerciseId, k);
+  }
+  return m;
 }
 
 // Séries enregistrées la dernière fois pour cet exercice, avant la séance donnée.
@@ -182,7 +201,7 @@ function addEntry(session, exId) {
 }
 
 function createExercise(name) {
-  name = cap(name.trim().replace(/\s+/g, ' '));
+  name = clean(name);
   const found = db.exercises.find(e => fold(e.name) === fold(name));
   if (found) return found;
   const ex = { id: uid(), name };
@@ -190,12 +209,23 @@ function createExercise(name) {
   return ex;
 }
 
+// Exercices déjà faits dont le nom contient la saisie, les plus récents d'abord.
+function matchExercises(q) {
+  const fq = fold(q);
+  if (!fq) return [];
+  const used = lastUsed();
+  return db.exercises
+    .filter(e => used.has(e.id) && fold(e.name).includes(fq))
+    .sort((a, b) => (fold(b.name).startsWith(fq) - fold(a.name).startsWith(fq)) || cmp(used.get(b.id), used.get(a.id)))
+    .slice(0, 5)
+    .map(e => e.name);
+}
+
 /* ---------- Navigation ---------- */
 
 let cur = { view: 'sessions' };
 let navStack = [];
 let replacing = false;
-let pendingScroll = null;
 const scrollMem = {};
 
 const go = path => { location.hash = '#' + path; };
@@ -212,92 +242,83 @@ window.addEventListener('hashchange', () => {
   closeSheet();
   route();
   scrollTo(0, restore ? scrollMem[h] || 0 : 0);
-  if (pendingScroll) {
-    const el = $(`[data-entry="${pendingScroll}"]`);
-    pendingScroll = null;
-    if (el) el.scrollIntoView({ block: 'center' });
-  }
 });
 
 function route() {
-  const [a, b, c] = location.hash.slice(2).split('/');
+  const [a, b] = location.hash.slice(2).split('/');
   let s, ex;
-  if (a === 's' && (s = db.sessions.find(x => x.id === b))) c === 'ajout' ? renderPicker(s) : renderSession(s);
+  if (a === 's' && (s = db.sessions.find(x => x.id === b))) renderSession(s);
   else if (a === 'e' && (ex = exById(b))) renderExercise(ex);
-  else if (a === 'exercices') renderExercises();
   else renderSessions();
+  document.body.dataset.view = cur.view;
   paintTimer();
 }
 
 function backBtn(parent) {
   const prev = navStack.length > 1 ? navStack[navStack.length - 2] : '#' + parent;
-  const label = prev.startsWith('#/s/') ? 'Séance'
-    : prev === '#/exercices' ? 'Exercices'
-    : prev.startsWith('#/e/') ? 'Exercice'
-    : 'Séances';
-  return `<button class="back" data-act="back" data-parent="${esc(parent)}">${I.back}<span>${label}</span></button>`;
+  const label = prev.startsWith('#/s/') ? 'Séance' : prev.startsWith('#/e/') ? 'Exercice' : 'Séances';
+  return `<button class="back" data-act="back" data-parent="${esc(parent)}">${I.back}<span class="label">${label}</span></button>`;
 }
-
-const tabs = active => `<header class="top">
-  <nav class="tabs">
-    <button data-act="tab" data-to="/"${active === 's' ? ' class="on" aria-current="page"' : ''}>Séances</button>
-    <button data-act="tab" data-to="/exercices"${active === 'e' ? ' class="on" aria-current="page"' : ''}>Exercices</button>
-  </nav>
-  <button class="icon" data-act="app-menu" aria-label="Données">${I.more}</button>
-</header>`;
 
 /* ---------- Écrans ---------- */
 
 function renderSessions() {
   prune();
   cur = { view: 'sessions' };
-  let html = tabs('s') + `<button class="btn solid" data-act="new-session">${I.plus}<span>Nouvelle séance</span></button>`;
   const list = sortedSessions();
-  if (!list.length) html += '<p class="empty">Aucune séance.</p>';
-  let month = '';
-  for (const s of list) {
-    const d = parseISO(s.date);
-    const m = dfMonth.format(d);
-    if (m !== month) { html += `<h2 class="label month">${esc(m)}</h2>`; month = m; }
-    const names = s.entries.map(en => exName(en.exerciseId)).join(' · ');
-    html += `<a class="srow" href="#/s/${s.id}">
-      <div class="sdate"><span class="dnum">${d.getDate()}</span><span class="dwd">${esc(dfWeekday.format(d).replace('.', ''))}</span></div>
-      <div class="sbody"><div class="sname">${esc(s.name.trim() || 'Séance')}</div><div class="ssub">${esc(names || '—')}</div></div>
-    </a>`;
-  }
-  app.innerHTML = html;
+  const nums = numbers();
+  const rows = list.map(s => `
+    <a class="srow" href="#/s/${s.id}">
+      <span class="srow-top"><span class="snum">${pad(nums.get(s.id))}</span><span class="micro">${esc(stamp(s.date))}</span></span>
+      <span class="sname">${esc(s.name.trim() || 'Sans titre')}</span>
+      <span class="ssub">${esc(s.entries.map(en => exName(en.exerciseId)).join(' · ') || '—')}</span>
+    </a>`).join('');
+  app.innerHTML = `
+    <header class="bar">
+      <span class="label">SCU</span>
+      <button class="icon" data-act="app-menu" aria-label="Sauvegarde">${I.dots}</button>
+    </header>
+    <section class="panel list">
+      <div class="phead"><span class="label">Séances</span><span class="micro">${pad(list.length)}</span></div>
+      ${rows || '<div class="void"><span class="void-num">00</span><span class="micro">Aucune séance</span></div>'}
+    </section>
+    <div class="dock"><button class="block" data-act="new-session"><span>Nouvelle séance</span>${I.plus}</button></div>`;
 }
 
 function renderSession(s) {
   cur = { view: 'session', session: s };
   app.innerHTML = `
-    <header class="top">${backBtn('/')}<button class="icon" data-act="session-menu" aria-label="Options de la séance">${I.more}</button></header>
-    <div class="head">
-      <input class="title" data-field="name" value="${esc(s.name)}" placeholder="Séance" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" aria-label="Nom de la séance">
-      <label class="date"><span class="date-text">${esc(longDate(s.date))}</span><input type="date" data-field="date" value="${s.date}" aria-label="Date de la séance"></label>
-    </div>
-    <div class="entries">${s.entries.map(en => entryHTML(s, en)).join('')}</div>
-    <button class="btn line add-ex" data-act="add-exercise">${I.plus}<span>Exercice</span></button>`;
+    <header class="bar">${backBtn('/')}<button class="icon" data-act="session-menu" aria-label="Options de la séance">${I.dots}</button></header>
+    <section class="panel">
+      <div class="phead">
+        <span class="label">Séance ${pad(numbers().get(s.id))}</span>
+        <label class="micro date"><span class="date-text">${esc(stamp(s.date))}</span><input type="date" data-field="date" value="${s.date}" aria-label="Date de la séance"></label>
+      </div>
+      <input class="title" data-field="name" value="${esc(s.name)}" placeholder="Sans titre" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" aria-label="Nom de la séance">
+    </section>
+    ${s.entries.map(en => entryHTML(s, en)).join('')}
+    <button class="panel addrow" data-act="add-exercise"><span class="label">Ajouter un exercice</span>${I.plus}</button>`;
 }
 
 function entryHTML(s, en) {
   const ex = exById(en.exerciseId) || { id: en.exerciseId, name: '?' };
   const sug = suggestions(s, en);
   const rows = en.sets.map((st, i) => `
-    <div class="grid set${st.done ? ' done' : ''}" data-i="${i}">
-      <span class="idx">${i + 1}</span>
-      <input class="num" data-field="w" inputmode="decimal" autocomplete="off" value="${fmt(st.w)}" placeholder="${fmt(sug[i].w)}" aria-label="Charge, série ${i + 1}">
+    <div class="sgrid set${st.done ? ' done' : ''}" data-i="${i}">
+      <span class="idx">${pad(i + 1)}</span>
+      <input class="num" data-field="w" inputmode="decimal" autocomplete="off" value="${fmt(st.w)}" placeholder="${fmt(sug[i].w)}" aria-label="Charge en kilos, série ${i + 1}">
       <input class="num" data-field="r" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${fmt(st.r)}" placeholder="${fmt(sug[i].r)}" aria-label="Répétitions, série ${i + 1}">
-      <button class="check" data-act="toggle-set" aria-label="Série ${i + 1} faite" aria-pressed="${st.done}">${I.check}</button>
+      <button class="switch" data-act="toggle-set" role="switch" aria-checked="${st.done}" aria-label="Série ${i + 1} faite"><i></i></button>
     </div>`).join('');
-  return `<section class="entry" data-entry="${en.id}">
-    <div class="ehead">
-      <a class="ename" href="#/e/${ex.id}">${esc(ex.name)}</a>
-      <button class="icon" data-act="entry-menu" aria-label="Options de l'exercice">${I.more}</button>
+  return `<section class="panel entry" data-entry="${en.id}">
+    <div class="phead">
+      <span class="label">Exercice ${pad(s.entries.indexOf(en) + 1)}</span>
+      <button class="icon" data-act="entry-menu" aria-label="Options de l'exercice">${I.dots}</button>
     </div>
-    ${en.sets.length ? '<div class="grid sethead label"><span>#</span><span>kg</span><span>rép.</span><span></span></div>' : ''}
+    <a class="ename" href="#/e/${ex.id}">${esc(ex.name)}</a>
+    ${en.sets.length ? '<div class="sgrid shead"><span class="micro">Série</span><span class="micro">Kg</span><span class="micro">Rép</span><span></span></div>' : ''}
     ${rows}
-    <button class="addset" data-act="add-set">${I.plus}<span>Série</span></button>
+    <button class="addset" data-act="add-set">${I.plus}<span class="label">Série</span></button>
   </section>`;
 }
 
@@ -314,119 +335,66 @@ function refreshPlaceholders(el, en) {
   });
 }
 
+const entryOf = el => cur.session.entries.find(x => x.id === el.closest('.entry').dataset.entry);
 function setOf(el) {
-  const sec = el.closest('.entry');
-  const en = cur.session.entries.find(x => x.id === sec.dataset.entry);
-  return { sec, en, i: Number(el.closest('.set').dataset.i) };
-}
-
-function renderPicker(s) {
-  cur = { view: 'picker', session: s };
-  app.innerHTML = `
-    <header class="top col">
-      <div>${backBtn('/s/' + s.id)}</div>
-      <input class="search" type="search" data-field="q" placeholder="Rechercher ou créer" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" aria-label="Exercice">
-    </header>
-    <div class="list" id="pick"></div>`;
-  paintPicker('');
-}
-
-function lastUsed() {
-  const m = new Map();
-  for (const s of db.sessions) {
-    const k = order(s);
-    for (const en of s.entries) if (k > (m.get(en.exerciseId) || '')) m.set(en.exerciseId, k);
-  }
-  return m;
-}
-
-function paintPicker(q) {
-  const used = lastUsed();
-  const inSession = new Set(cur.session.entries.map(en => en.exerciseId));
-  const fq = fold(q);
-  const list = db.exercises
-    .filter(ex => !fq || fold(ex.name).includes(fq))
-    .sort((a, b) => cmp(used.get(b.id) || '', used.get(a.id) || '') || a.name.localeCompare(b.name, 'fr'));
-  let html = '';
-  if (fq && !db.exercises.some(ex => fold(ex.name) === fq)) {
-    html += `<button class="row create" data-act="pick-new">${I.plus}<span>Créer « ${esc(q.trim())} »</span></button>`;
-  }
-  html += list.map(ex => `<button class="row" data-act="pick" data-id="${ex.id}">
-    <span class="row-name">${esc(ex.name)}</span>${inSession.has(ex.id) ? '<span class="meta">Dans la séance</span>' : ''}
-  </button>`).join('');
-  $('#pick').innerHTML = html || '<p class="empty">Aucun exercice.</p>';
-}
-
-function pickExercise(ex) {
-  const en = addEntry(cur.session, ex.id);
-  save();
-  pendingScroll = en.id;
-  back('/s/' + cur.session.id);
-}
-
-function renderExercises() {
-  prune();
-  cur = { view: 'exercises' };
-  const last = new Map();
-  for (const s of [...db.sessions].sort((a, b) => cmp(order(a), order(b)))) {
-    for (const en of s.entries) {
-      const sets = en.sets.filter(logged);
-      if (sets.length) last.set(en.exerciseId, topSet(sets));
-    }
-  }
-  const list = [...db.exercises].sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
-  app.innerHTML = tabs('e')
-    + `<button class="btn line" data-act="new-exercise">${I.plus}<span>Nouvel exercice</span></button>`
-    + '<div class="list">'
-    + list.map(ex => `<a class="row" href="#/e/${ex.id}">
-        <span class="row-name">${esc(ex.name)}</span>
-        <span class="meta">${last.has(ex.id) ? esc(fmtSet(last.get(ex.id))) : ''}</span>
-      </a>`).join('')
-    + '</div>'
-    + (list.length ? '' : '<p class="empty">Aucun exercice.</p>');
+  return { sec: el.closest('.entry'), en: entryOf(el), i: Number(el.closest('.set').dataset.i) };
 }
 
 function renderExercise(ex) {
   cur = { view: 'exercise', exercise: ex };
   let best = null;
+  let last = null;
   const rows = [];
   for (const s of sortedSessions()) {
     const sets = s.entries.filter(en => en.exerciseId === ex.id).flatMap(en => en.sets.filter(logged));
     if (!sets.length) continue;
+    last = last || s;
     const t = topSet(sets);
     if (!best || heavier(t, best)) best = t;
     rows.push(`<a class="hrow" href="#/s/${s.id}">
-      <span class="hdate">${esc(shortDate(s.date))}</span>
+      <span class="micro">${esc(dayMonth(s.date))}</span>
       <span class="hsets">${sets.map(st => `<span>${esc(fmtSet(st))}</span>`).join('')}</span>
     </a>`);
   }
   app.innerHTML = `
-    <header class="top">${backBtn('/exercices')}<button class="icon" data-act="exercise-menu" aria-label="Options de l'exercice">${I.more}</button></header>
-    <h1 class="title">${esc(ex.name)}</h1>
-    ${rows.length ? `<div class="stats">
-      <div><div class="label">Record</div><div class="stat">${esc(fmtRecord(best))}</div></div>
-      <div><div class="label">Séances</div><div class="stat">${rows.length}</div></div>
-    </div>${rows.join('')}` : '<p class="empty">Pas encore de séries.</p>'}`;
+    <header class="bar">${backBtn('/')}<button class="icon" data-act="exercise-menu" aria-label="Options de l'exercice">${I.dots}</button></header>
+    <section class="panel">
+      <div class="phead"><span class="label">Exercice</span><span class="micro">${pad(rows.length)} séance${rows.length > 1 ? 's' : ''}</span></div>
+      <h1 class="title">${esc(ex.name)}</h1>
+    </section>
+    ${rows.length ? `
+    <section class="panel split">
+      <div><span class="micro">Record</span><span class="stat">${recordHTML(best)}</span></div>
+      <div><span class="micro">Dernière fois</span><span class="stat">${esc(dayMonth(last.date))}</span></div>
+    </section>
+    <section class="panel list">
+      <div class="phead"><span class="label">Historique</span></div>
+      ${rows.join('')}
+    </section>` : '<section class="panel"><span class="micro">Aucune série enregistrée</span></section>'}`;
 }
 
-/* ---------- Feuilles d'action ---------- */
+/* ---------- Feuilles ---------- */
 
 let sheetState = null;
 
+// opts : { title, message, input: { value, placeholder, suggest }, submit: { label, run }, actions: [...] }
 function sheet(opts) {
   sheetState = opts;
   const root = $('#sheet');
   root.innerHTML = `<div class="sheet-wrap">
     <div class="backdrop" data-act="sheet-close"></div>
     <div class="sheet" role="dialog" aria-modal="true">
-      ${opts.title ? `<p class="sheet-title">${esc(opts.title)}</p>` : ''}
-      ${opts.input ? `<input class="sheet-input" value="${esc(opts.input.value || '')}" placeholder="${esc(opts.input.placeholder || '')}" autocomplete="off" autocapitalize="sentences" enterkeyhint="done">` : ''}
-      ${(opts.actions || []).map((a, i) => `<button class="sheet-btn${a.danger ? ' danger' : ''}" data-act="sheet-do" data-i="${i}">${esc(a.label)}</button>`).join('')}
-      <button class="sheet-btn cancel" data-act="sheet-close">${esc(opts.cancel || 'Annuler')}</button>
+      ${opts.title ? `<div class="sheet-head"><span class="label">${esc(opts.title)}</span></div>` : ''}
+      ${opts.message ? `<p class="sheet-msg">${esc(opts.message)}</p>` : ''}
+      ${opts.input ? `<div class="sheet-field"><input class="sheet-input" value="${esc(opts.input.value || '')}" placeholder="${esc(opts.input.placeholder || '')}" autocomplete="off" autocorrect="off" autocapitalize="sentences" enterkeyhint="done"></div><div class="sugg" id="sugg"></div>` : ''}
+      ${(opts.actions || []).map((a, i) => `<button class="sheet-row${a.danger ? ' danger' : ''}" data-act="sheet-do" data-i="${i}">${esc(a.label)}</button>`).join('')}
+      ${opts.submit ? `<button class="block" data-act="sheet-submit"><span>${esc(opts.submit.label)}</span>${I.plus}</button>` : ''}
+      <button class="sheet-row cancel" data-act="sheet-close">${esc(opts.cancel || 'Annuler')}</button>
     </div>
   </div>`;
   const wrap = root.firstElementChild;
   if (opts.input) {
+    // Ouverte d'emblée : le clavier ne s'affiche que si le focus est pris pendant le geste.
     wrap.classList.add('open');
     const input = $('.sheet-input', root);
     input.focus();
@@ -446,24 +414,46 @@ function closeSheet() {
 }
 
 function runSheetAction(i) {
-  const st = sheetState;
-  if (!st) return;
-  const a = st.actions[i];
-  const value = $('#sheet .sheet-input')?.value ?? '';
+  const a = sheetState?.actions?.[i];
+  if (!a) return;
   if (a.confirm) {
-    sheet({ title: a.confirm, actions: [{ label: a.confirmLabel || a.label, danger: true, run: a.run }] });
+    sheet({ title: a.label, message: a.confirm, actions: [{ label: a.confirmLabel || a.label, danger: true, run: a.run }] });
     return;
   }
   closeSheet();
-  a.run(value);
+  a.run();
+}
+
+function submitSheet(value) {
+  const st = sheetState;
+  if (!st?.submit) return;
+  const input = $('#sheet .sheet-input');
+  const v = (value ?? input?.value ?? '').trim();
+  if (!v) { input?.focus(); return; }
+  closeSheet();
+  st.submit.run(v);
+}
+
+function paintSuggestions(q) {
+  const box = $('#sugg');
+  if (!box) return;
+  box.innerHTML = sheetState.input.suggest(q)
+    .map(n => `<button class="sheet-row" data-act="sheet-pick" data-name="${esc(n)}">${esc(n)}</button>`)
+    .join('');
 }
 
 /* ---------- Minuteur ---------- */
 
 const timerEl = $('#timer');
-const tTime = $('#ttime');
+const tMin = $('#tmin');
+const tSec = $('#tsec');
+const tSign = $('#tsign');
+const tState = $('#tstate');
 const tGo = $('#tgo');
-const tProg = $('.tprog');
+const meter = $('#meter');
+meter.innerHTML = '<i></i>'.repeat(BARS);
+const bars = [...meter.children];
+let litBars = -1;
 let actx = null;
 let wakeLock = null;
 
@@ -537,27 +527,34 @@ const timer = {
   },
 };
 
-function clock(ms, up) {
-  const s = Math.max(0, up ? Math.ceil(ms / 1000) : Math.floor(ms / 1000));
-  return `${Math.floor(s / 60)}:${pad(s % 60)}`;
-}
-
 function paintTimer() {
   const run = timer.running();
   const rem = run ? timer.remaining() : db.settings.rest * 1000;
   const over = run && rem <= 0;
+  const secs = over ? Math.floor(-rem / 1000) : Math.ceil(rem / 1000);
+  const m = pad(Math.floor(secs / 60));
+  const s = pad(secs % 60);
+  if (tMin.textContent !== m) tMin.textContent = m;
+  if (tSec.textContent !== s) tSec.textContent = s;
+  tSign.hidden = !over;
+  tState.textContent = over ? 'Terminé' : run ? 'Restant' : 'Prêt';
   timerEl.classList.toggle('run', run);
   timerEl.classList.toggle('over', over);
-  const text = over ? '+' + clock(-rem) : clock(rem, true);
-  if (tTime.textContent !== text) tTime.textContent = text;
-  tProg.style.transform = `scaleX(${run && !over ? Math.min(1, rem / (timer.dur * 1000)) : 0})`;
+
+  const lit = over ? BARS : run ? Math.round((1 - rem / (timer.dur * 1000)) * BARS) : 0;
+  if (lit !== litBars) {
+    bars.forEach((b, i) => b.classList.toggle('on', i < lit));
+    litBars = lit;
+  }
+
   const state = run ? 'stop' : 'play';
   if (tGo.dataset.state !== state) {
     tGo.dataset.state = state;
     tGo.innerHTML = I[state];
     tGo.setAttribute('aria-label', run ? 'Arrêter le repos' : 'Démarrer le repos');
   }
-  const show = cur.view === 'session' || run;
+
+  const show = cur.view === 'session' || (run && cur.view === 'exercise');
   timerEl.hidden = !show;
   document.body.classList.toggle('has-timer', show);
 }
@@ -604,7 +601,7 @@ async function keepAwake(on) {
   } catch { wakeLock = null; }
 }
 
-/* ---------- Export / import ---------- */
+/* ---------- Sauvegarde ---------- */
 
 async function exportData() {
   flush();
@@ -628,13 +625,18 @@ $('#file').addEventListener('change', async e => {
   if (!f) return;
   let data;
   try { data = normalize(JSON.parse(await f.text())); } catch {
-    sheet({ title: 'Fichier illisible.', cancel: 'OK' });
+    sheet({ title: 'Importer', message: 'Ce fichier est illisible.', cancel: 'OK' });
     return;
   }
   const n = data.sessions.length;
   sheet({
-    title: `Remplacer toutes les données par ce fichier (${n} séance${n > 1 ? 's' : ''}) ?`,
-    actions: [{ label: 'Remplacer', danger: true, run: () => { db = data; flush(); timer.stop(); replace('/'); route(); } }],
+    title: 'Importer',
+    message: `Remplacer toutes les données par ce fichier (${n} séance${n > 1 ? 's' : ''}) ?`,
+    actions: [{
+      label: 'Remplacer',
+      danger: true,
+      run: () => { db = data; pruneExercises(); flush(); timer.stop(); replace('/'); route(); },
+    }],
   });
 });
 
@@ -642,7 +644,6 @@ $('#file').addEventListener('change', async e => {
 
 const actions = {
   back: el => back(el.dataset.parent),
-  tab: el => { if (location.hash !== '#' + el.dataset.to) replace(el.dataset.to); },
 
   'new-session': () => {
     const s = newSession();
@@ -650,12 +651,23 @@ const actions = {
     save();
     go('/s/' + s.id);
   },
-  'add-exercise': () => go(`/s/${cur.session.id}/ajout`),
-  pick: el => pickExercise(exById(el.dataset.id)),
-  'pick-new': () => pickExercise(createExercise($('.search').value)),
+
+  'add-exercise': () => sheet({
+    title: 'Exercice',
+    input: { placeholder: "Nom de l'exercice", suggest: matchExercises },
+    submit: {
+      label: 'Ajouter',
+      run: name => {
+        const en = addEntry(cur.session, createExercise(name).id);
+        save();
+        renderSession(cur.session);
+        $(`[data-entry="${en.id}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      },
+    },
+  }),
 
   'add-set': el => {
-    const en = cur.session.entries.find(x => x.id === el.closest('.entry').dataset.entry);
+    const en = entryOf(el);
     en.sets.push({ w: null, r: null, done: false });
     save();
     repaintEntry(en);
@@ -676,15 +688,15 @@ const actions = {
       }
       Object.assign(st, { w, r, done: true });
       timer.start(db.settings.rest);
-      navigator.vibrate?.(10);
     }
+    haptic();
     save();
     repaintEntry(en);
   },
 
   'entry-menu': el => {
     const s = cur.session;
-    const en = s.entries.find(x => x.id === el.closest('.entry').dataset.entry);
+    const en = entryOf(el);
     const i = s.entries.indexOf(en);
     const move = d => () => { s.entries.splice(i, 1); s.entries.splice(i + d, 0, en); save(); renderSession(s); };
     const list = [];
@@ -704,6 +716,7 @@ const actions = {
   'session-menu': () => {
     const s = cur.session;
     sheet({
+      title: 'Séance',
       actions: [
         {
           label: 'Refaire cette séance',
@@ -727,11 +740,6 @@ const actions = {
     });
   },
 
-  'new-exercise': () => sheet({
-    input: { placeholder: "Nom de l'exercice" },
-    actions: [{ label: 'Ajouter', run: v => { if (v.trim()) { createExercise(v); save(); route(); } } }],
-  }),
-
   'exercise-menu': () => {
     const ex = cur.exercise;
     const used = db.sessions.filter(s => s.entries.some(en => en.exerciseId === ex.id)).length;
@@ -741,20 +749,21 @@ const actions = {
         {
           label: 'Renommer',
           run: () => sheet({
+            title: 'Renommer',
             input: { value: ex.name, placeholder: "Nom de l'exercice" },
-            actions: [{ label: 'Renommer', run: v => { if (v.trim()) { ex.name = cap(v.trim().replace(/\s+/g, ' ')); save(); route(); } } }],
+            submit: { label: 'Enregistrer', run: v => { ex.name = clean(v); save(); route(); } },
           }),
         },
         {
           label: "Supprimer l'exercice",
           danger: true,
-          confirm: used ? `Supprimer ${ex.name} et son historique (${used} séance${used > 1 ? 's' : ''}) ?` : `Supprimer ${ex.name} ?`,
+          confirm: `Supprimer ${ex.name} de ${used > 1 ? `ses ${used} séances` : 'sa séance'}, avec toutes ses séries ?`,
           confirmLabel: 'Supprimer',
           run: () => {
             db.exercises = db.exercises.filter(x => x !== ex);
             for (const s of db.sessions) s.entries = s.entries.filter(en => en.exerciseId !== ex.id);
             save();
-            back('/exercices');
+            back('/');
           },
         },
       ],
@@ -762,17 +771,20 @@ const actions = {
   },
 
   'app-menu': () => sheet({
-    title: 'Les données restent sur ce téléphone.',
+    title: 'Sauvegarde',
+    message: 'Les données restent sur ce téléphone. Exportez-les de temps en temps.',
     actions: [
-      { label: 'Exporter une sauvegarde', run: exportData },
-      { label: 'Importer une sauvegarde', run: () => $('#file').click() },
+      { label: 'Exporter', run: exportData },
+      { label: 'Importer', run: () => $('#file').click() },
     ],
   }),
 
   'sheet-do': el => runSheetAction(Number(el.dataset.i)),
+  'sheet-submit': () => submitSheet(),
+  'sheet-pick': el => submitSheet(el.dataset.name),
   'sheet-close': closeSheet,
 
-  't-toggle': () => (timer.running() ? timer.stop() : timer.start(db.settings.rest)),
+  't-toggle': () => { haptic(); timer.running() ? timer.stop() : timer.start(db.settings.rest); },
   't-minus': () => timer.adjust(-STEP),
   't-plus': () => timer.adjust(STEP),
 };
@@ -799,9 +811,9 @@ document.addEventListener('input', e => {
   } else if (f === 'date' && el.value) {
     cur.session.date = el.value;
     save();
-    $('.date-text').textContent = longDate(el.value);
-  } else if (f === 'q') {
-    paintPicker(el.value);
+    $('.date-text').textContent = stamp(el.value);
+  } else if (el.matches('.sheet-input') && sheetState?.input?.suggest) {
+    paintSuggestions(el.value);
   }
 });
 
@@ -827,18 +839,18 @@ document.addEventListener('keydown', e => {
   const el = e.target;
   if (e.key === 'Escape' && sheetState) closeSheet();
   if (e.key !== 'Enter') return;
-  if (el.matches('.sheet-input') && sheetState?.actions?.length) { e.preventDefault(); runSheetAction(0); }
+  if (el.matches('.sheet-input')) { e.preventDefault(); submitSheet(); }
   else if (el.matches('.title, .num')) el.blur();
-  else if (el.matches('.search')) {
-    const first = $('#pick [data-act]');
-    if (first && el.value.trim()) first.click();
-  }
 });
 
-// Garde les feuilles d'action au-dessus du clavier.
+// Garde les feuilles au-dessus du clavier.
 if (window.visualViewport) {
   const vv = window.visualViewport;
-  const fit = () => document.documentElement.style.setProperty('--kb', `${Math.max(0, window.innerHeight - vv.height - vv.offsetTop)}px`);
+  const fit = () => {
+    const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    document.documentElement.style.setProperty('--kb', `${kb}px`);
+    document.documentElement.classList.toggle('kb', kb > 0);
+  };
   vv.addEventListener('resize', fit);
   vv.addEventListener('scroll', fit);
 }
@@ -849,17 +861,31 @@ document.addEventListener('visibilitychange', () => {
     timer.tick();
     if (timer.remaining() > 0) keepAwake(true);
   }
+  swReg?.update().catch(() => {});
 });
 window.addEventListener('pagehide', flush);
 
 /* ---------- Démarrage ---------- */
 
+let swReg = null;
+
+pruneExercises();
 if (!location.hash || location.hash === '#') history.replaceState(null, '', '#/');
 navStack = [location.hash];
 route();
 timer.restore();
 paintTimer();
 navigator.storage?.persist?.().catch(() => {});
+
+// Nouvelle version publiée : on recharge une fois qu'elle est prête.
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  const updating = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!updating || reloaded) return;
+    reloaded = true;
+    flush();
+    location.reload();
+  });
+  navigator.serviceWorker.register('sw.js').then(reg => { swReg = reg; }).catch(() => {});
 }
