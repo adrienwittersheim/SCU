@@ -1,10 +1,11 @@
 // Hors ligne : l'app est servie depuis le cache de sa version.
 // Changer VERSION à chaque publication : l'app se met à jour au lancement suivant.
-const VERSION = 'scu-v4';
+const VERSION = 'scu-v5';
 const ASSETS = [
   './',
   'index.html',
   'style.css',
+  'programme.js',
   'app.js',
   'manifest.webmanifest',
   'icons/icon.svg',

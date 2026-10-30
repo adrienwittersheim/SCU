@@ -1,24 +1,30 @@
 'use strict';
 
 /* SCU — séances, exercices, séries, charges.
-   Tout est stocké sur l'appareil (localStorage). Aucune dépendance. */
+   Tout est stocké sur l'appareil (localStorage). Aucune dépendance.
+
+   Une séance se refait d'une fois sur l'autre : chaque série garde la charge
+   et les répétitions de la dernière fois. Valider une série l'inscrit au
+   journal (historique, record) ; la coche s'efface d'elle-même le lendemain. */
 
 const KEY = 'scu.v1';
 const TIMER_KEY = 'scu.timer';
 const STEP = 15;                 // pas du minuteur, en secondes
 const REST_MAX = 600;
 const OVERTIME = 10 * 60 * 1000; // le dépassement s'affiche 10 min au plus
+const LATE = 4 * 3600 * 1000;    // une séance commencée tard reste cochée après minuit
 const ROW = 44;                  // hauteur d'un cran de molette, en px
 
 const KG = Array.from({ length: 401 }, (_, i) => i);
 const KG_DEC = [0, 0.25, 0.5, 0.75];
 const KG_DEC_LABELS = [',0', ',25', ',5', ',75'];
-const REPS = Array.from({ length: 100 }, (_, i) => i + 1);
+const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 
 const I = {
   dots: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
   back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5v15M4.5 12h15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  minus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 12h13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
   play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13a.7.7 0 0 0 1.05.6l10.4-6.5a.7.7 0 0 0 0-1.2L9.05 4.9A.7.7 0 0 0 8 5.5z"/></svg>',
   stop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg>',
 };
@@ -30,7 +36,7 @@ const app = $('#app');
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const pad = n => String(n).padStart(2, '0');
-const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const dayKey = t => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 const clean = s => cap(s.trim().replace(/\s+/g, ' '));
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -39,14 +45,17 @@ const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 const num = v => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v * 100) / 100 : null);
-const fmt = n => (n == null ? '' : String(n).replace('.', ','));
-const logged = st => st.done && st.r != null; // seules les séries faites comptent
+const fmt = n => (n == null ? '–' : String(n).replace('.', ','));
 const clampRest = v => (Number(v) > 0 ? clamp(Math.round(v / STEP) * STEP, STEP, REST_MAX) : 90);
 
 const fmtSet = st => (st.w ? `${fmt(st.w)}×${st.r}` : `${st.r} rép`);
 const fmtRecord = st => (st.w ? `${fmt(st.w)} kg × ${st.r}` : `${st.r} rép`);
+const fmtTarget = t => `${t.sets} × ${t.min == null ? 'max' : t.min === t.max ? t.min : `${t.min}–${t.max}`}`;
 const heavier = (a, b) => (a.w ?? 0) > (b.w ?? 0) || ((a.w ?? 0) === (b.w ?? 0) && a.r > b.r);
 const topSet = sets => sets.reduce((best, st) => (heavier(st, best) ? st : best));
+
+// Faite aujourd'hui (ou il y a moins de 4 h) : la coche s'efface la fois suivante.
+const isDone = st => st.at != null && (dayKey(st.at) === dayKey(Date.now()) || Date.now() - st.at < LATE);
 
 // Retour haptique : vibreur sur Android, interrupteur natif sur iPhone (iOS 18+).
 const haptic = (() => {
@@ -65,7 +74,7 @@ let db = load();
 let saveTimer = 0;
 
 function blank() {
-  return { version: 1, exercises: [], sessions: [], settings: { rest: 90 } };
+  return { version: 2, exercises: [], sessions: [], log: [], settings: { rest: 90 }, imports: [] };
 }
 
 function load() {
@@ -82,30 +91,59 @@ function load() {
   }
 }
 
+function normalizeTarget(t) {
+  if (!t || !(t.sets >= 1)) return null;
+  const min = num(t.min);
+  return { sets: Math.round(t.sets), min, max: min == null ? null : Math.max(min, num(t.max) ?? min) };
+}
+
+// Lit les données des deux formats : v1 (une séance par entraînement, datée) et v2.
 function normalize(d) {
   if (!d || !Array.isArray(d.exercises) || !Array.isArray(d.sessions)) throw new Error('Format inconnu');
+  const v1 = !(d.version >= 2);
   const exercises = d.exercises
     .filter(e => e && e.id != null && typeof e.name === 'string')
     .map(e => ({ id: String(e.id), name: e.name }));
   const ids = new Set(exercises.map(e => e.id));
-  const sessions = d.sessions.filter(s => s && s.id != null).map(s => ({
-    id: String(s.id),
-    date: /^\d{4}-\d{2}-\d{2}$/.test(s.date) ? s.date : today(),
-    createdAt: Number(s.createdAt) || 0,
-    name: typeof s.name === 'string' ? s.name : '',
-    entries: (Array.isArray(s.entries) ? s.entries : [])
-      .filter(en => en && ids.has(String(en.exerciseId)))
-      .map(en => ({
-        id: String(en.id ?? uid()),
-        exerciseId: String(en.exerciseId),
-        sets: (Array.isArray(en.sets) ? en.sets : []).map(st => ({
-          w: num(st && st.w),
-          r: num(st && st.r),
-          done: !!(st && st.done),
+  const log = (Array.isArray(d.log) ? d.log : [])
+    .filter(e => e && ids.has(String(e.ex)) && num(e.r) != null && Number(e.at) > 0)
+    .map(e => ({ ex: String(e.ex), w: num(e.w), r: num(e.r), at: Number(e.at) }));
+  const today = dayKey(Date.now());
+
+  const sessions = d.sessions.filter(s => s && s.id != null).map(s => {
+    const day = v1 && /^\d{4}-\d{2}-\d{2}$/.test(s.date) ? s.date : today;
+    const base = new Date(`${day}T12:00`).getTime() + (Number(s.createdAt) % 1000 || 0);
+    return {
+      id: String(s.id),
+      name: typeof s.name === 'string' ? s.name : '',
+      entries: (Array.isArray(s.entries) ? s.entries : [])
+        .filter(en => en && ids.has(String(en.exerciseId)))
+        .map(en => ({
+          id: String(en.id ?? uid()),
+          exerciseId: String(en.exerciseId),
+          target: normalizeTarget(en.target),
+          sets: (Array.isArray(en.sets) ? en.sets : []).map((st, i) => {
+            const w = num(st && st.w);
+            const r = num(st && st.r);
+            if (!v1) return { w, r, at: Number(st && st.at) > 0 ? Number(st.at) : null };
+            // v1 : les séries faites passent au journal, et restent cochées si c'était aujourd'hui.
+            if (!(st && st.done) || r == null) return { w, r, at: null };
+            const at = day === today ? Date.now() - 1000 + i : base + i;
+            log.push({ ex: String(en.exerciseId), w, r, at });
+            return { w, r, at: day === today ? at : null };
+          }),
         })),
-      })),
-  }));
-  return { version: 1, exercises, sessions, settings: { rest: clampRest(d.settings && d.settings.rest) } };
+    };
+  });
+
+  return {
+    version: 2,
+    exercises,
+    sessions,
+    log: log.sort((a, b) => a.at - b.at),
+    settings: { rest: clampRest(d.settings && d.settings.rest) },
+    imports: Array.isArray(d.imports) ? d.imports.filter(x => typeof x === 'string') : [],
+  };
 }
 
 function save() { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 250); }
@@ -116,77 +154,14 @@ function flush() {
 
 const exById = id => db.exercises.find(e => e.id === id);
 const exName = id => (exById(id) || { name: '?' }).name;
-// La date ne s'affiche plus ; elle sert seulement à garder l'ordre des séances.
-const order = s => `${s.date}|${String(s.createdAt).padStart(15, '0')}`;
-const sortedSessions = () => [...db.sessions].sort((a, b) => cmp(order(b), order(a)));
-const blankSets = n => Array.from({ length: n }, () => ({ w: null, r: null, done: false }));
-const newSession = () => ({ id: uid(), date: today(), createdAt: Date.now(), name: '', entries: [] });
+const blankSets = n => Array.from({ length: n }, () => ({ w: null, r: null, at: null }));
 
-// Un exercice n'existe que tant qu'une séance l'utilise.
+// Un exercice existe tant qu'une séance ou le journal s'en sert.
 function pruneExercises() {
-  const used = new Set(db.sessions.flatMap(s => s.entries.map(en => en.exerciseId)));
+  const used = new Set([...db.sessions.flatMap(s => s.entries.map(en => en.exerciseId)), ...db.log.map(e => e.ex)]);
   const n = db.exercises.length;
   db.exercises = db.exercises.filter(e => used.has(e.id));
   if (db.exercises.length !== n) save();
-}
-
-// Les séances ouvertes puis laissées vides disparaissent d'elles-mêmes.
-function prune() {
-  const n = db.sessions.length;
-  db.sessions = db.sessions.filter(s => s.entries.length || s.name.trim());
-  if (db.sessions.length !== n) save();
-  pruneExercises();
-}
-
-function lastUsed() {
-  const m = new Map();
-  for (const s of db.sessions) {
-    const k = order(s);
-    for (const en of s.entries) if (k > (m.get(en.exerciseId) || '')) m.set(en.exerciseId, k);
-  }
-  return m;
-}
-
-// Séries enregistrées la dernière fois pour cet exercice, avant la séance donnée.
-function previousSets(exId, session) {
-  const limit = order(session);
-  let best = null;
-  let bestKey = '';
-  for (const s of db.sessions) {
-    const k = order(s);
-    if (s === session || k >= limit || k <= bestKey) continue;
-    const sets = s.entries.filter(en => en.exerciseId === exId).flatMap(en => en.sets.filter(logged));
-    if (sets.length) { best = sets; bestKey = k; }
-  }
-  return best || [];
-}
-
-// Valeurs proposées pour chaque série : celles de la dernière fois,
-// ou celles de la série précédente dès qu'on s'en écarte.
-function suggestions(session, entry) {
-  const hist = previousSets(entry.exerciseId, session);
-  const out = [];
-  let prev = null;
-  let prevHist = null;
-  entry.sets.forEach((st, i) => {
-    const h = hist[i] || null;
-    const sug = { w: null, r: null };
-    for (const f of ['w', 'r']) {
-      if (h && h[f] != null && (!prev || (prevHist && prev[f] === prevHist[f]))) sug[f] = h[f];
-      else if (prev) sug[f] = prev[f];
-    }
-    out.push(sug);
-    prev = { w: st.w ?? sug.w, r: st.r ?? sug.r };
-    prevHist = h;
-  });
-  return out;
-}
-
-function addEntry(session, exId) {
-  const n = Math.max(1, previousSets(exId, session).length);
-  const en = { id: uid(), exerciseId: exId, sets: blankSets(n) };
-  session.entries.push(en);
-  return en;
 }
 
 function createExercise(name) {
@@ -198,16 +173,95 @@ function createExercise(name) {
   return ex;
 }
 
-// Exercices déjà faits dont le nom contient la saisie, les plus récents d'abord.
+/* ---------- Journal ---------- */
+
+const logIndex = (exId, st) => db.log.findIndex(e => e.ex === exId && e.at === st.at);
+
+function logAdd(exId, st) {
+  st.at = Date.now();
+  db.log.push({ ex: exId, w: st.w, r: st.r, at: st.at });
+}
+
+function logRemove(exId, st) {
+  const i = logIndex(exId, st);
+  st.at = null;
+  return i >= 0 ? db.log.splice(i, 1)[0] : null;
+}
+
+function logUpdate(exId, st) {
+  const i = logIndex(exId, st);
+  if (i >= 0) Object.assign(db.log[i], { w: st.w, r: st.r });
+}
+
+// Séries validées d'un exercice, regroupées par jour, la plus récente d'abord.
+function workouts(exId) {
+  const days = new Map();
+  for (const e of db.log) {
+    if (e.ex !== exId) continue;
+    const k = dayKey(e.at);
+    if (!days.has(k)) days.set(k, []);
+    days.get(k).push(e);
+  }
+  return [...days.entries()].sort((a, b) => cmp(b[0], a[0])).map(([, sets]) => sets.sort((a, b) => a.at - b.at));
+}
+
+// La règle du programme : haut de la fourchette sur toutes les séries → monter la charge.
+// L'indication disparaît dès qu'une charge plus lourde est prévue.
+function goUp(en) {
+  const t = en.target;
+  if (!t || t.max == null) return false;
+  const last = workouts(en.exerciseId)[0];
+  if (!last || last.length < t.sets || !last.every(e => e.r >= t.max)) return false;
+  const lastW = Math.max(...last.map(e => e.w ?? 0));
+  return !en.sets.some(st => st.w != null && st.w > lastW);
+}
+
+function addEntry(session, exId) {
+  const last = workouts(exId)[0] || [];
+  const twin = db.sessions.flatMap(s => s.entries).find(e => e.exerciseId === exId && e.target);
+  const en = {
+    id: uid(),
+    exerciseId: exId,
+    target: twin ? { ...twin.target } : null,
+    sets: last.length ? last.map(e => ({ w: e.w, r: e.r, at: null })) : blankSets(twin ? twin.target.sets : 1),
+  };
+  session.entries.push(en);
+  return en;
+}
+
+// Exercices dont le nom contient la saisie : ceux qui commencent pareil, puis les plus récents.
 function matchExercises(q) {
   const fq = fold(q);
   if (!fq) return [];
-  const used = lastUsed();
+  const recent = new Map(db.log.map(e => [e.ex, e.at]));
   return db.exercises
-    .filter(e => used.has(e.id) && fold(e.name).includes(fq))
-    .sort((a, b) => (fold(b.name).startsWith(fq) - fold(a.name).startsWith(fq)) || cmp(used.get(b.id), used.get(a.id)))
+    .filter(e => fold(e.name).includes(fq))
+    .sort((a, b) => (fold(b.name).startsWith(fq) - fold(a.name).startsWith(fq)) || ((recent.get(b.id) || 0) - (recent.get(a.id) || 0)))
     .slice(0, 5)
     .map(e => e.name);
+}
+
+// Ajoute le programme une seule fois, sans toucher à ce qui existe.
+function importProgramme() {
+  if (typeof PROGRAMME === 'undefined' || db.imports.includes(PROGRAMME.id)) return;
+  let at = Date.now() - 24 * 3600 * 1000;
+  for (const seance of PROGRAMME.seances) {
+    const s = { id: uid(), name: seance.name, entries: [] };
+    for (const [name, [n, min, max], given = []] of seance.exercices) {
+      const ex = createExercise(name);
+      const sets = given.length ? given : Array.from({ length: n }, () => [null, null]);
+      s.entries.push({
+        id: uid(),
+        exerciseId: ex.id,
+        target: { sets: n, min, max },
+        sets: sets.map(([w, r]) => ({ w, r, at: null })),
+      });
+      for (const [w, r] of sets) if (r != null) db.log.push({ ex: ex.id, w, r, at: at++ });
+    }
+    db.sessions.push(s);
+  }
+  db.imports.push(PROGRAMME.id);
+  save();
 }
 
 /* ---------- Navigation ---------- */
@@ -234,7 +288,10 @@ window.addEventListener('hashchange', () => {
   scrollTo(0, restore ? scrollMem[h] || 0 : 0);
 });
 
+let renderedDay = '';
+
 function route() {
+  renderedDay = dayKey(Date.now());
   const [a, b] = location.hash.slice(2).split('/');
   let s, ex;
   if (a === 's' && (s = db.sessions.find(x => x.id === b))) renderSession(s);
@@ -249,17 +306,17 @@ const backBtn = parent => `<button class="icon" data-act="back" data-parent="${e
 /* ---------- Écrans ---------- */
 
 function renderSessions() {
-  prune();
+  pruneExercises();
   cur = { view: 'sessions' };
-  const rows = sortedSessions().map(s => `
+  const rows = db.sessions.map(s => `
     <a class="srow" href="#/s/${s.id}">
-      <span class="sname">${esc(s.name.trim() || 'sans titre')}</span>
-      <span class="ssub">${esc(s.entries.map(en => exName(en.exerciseId)).join(', '))}</span>
+      <span>${esc(s.name || 'Sans titre')}</span>
+      ${s.entries.some(en => en.sets.some(isDone)) ? '<i class="live" aria-label="en cours"></i>' : ''}
     </a>`).join('');
   app.innerHTML = `
     <header class="top"><span></span><button class="icon" data-act="app-menu" aria-label="Sauvegarde">${I.dots}</button></header>
-    <h1 class="home-title">séances</h1>
-    ${rows || '<p class="empty">aucune séance</p>'}
+    <h1>Séances</h1>
+    <nav class="slist">${rows || '<p class="empty">Aucune séance.</p>'}</nav>
     <button class="fab" data-act="new-session" aria-label="Nouvelle séance">${I.plus}</button>`;
 }
 
@@ -267,30 +324,29 @@ function renderSession(s) {
   cur = { view: 'session', session: s };
   app.innerHTML = `
     <header class="top">${backBtn('/')}<button class="icon" data-act="session-menu" aria-label="Options de la séance">${I.dots}</button></header>
-    <input class="title" data-field="name" value="${esc(s.name)}" placeholder="sans titre" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" aria-label="Nom de la séance">
-    ${s.entries.map(en => entryHTML(s, en)).join('')}
+    <h1>${esc(s.name || 'Sans titre')}</h1>
+    ${s.entries.map(entryHTML).join('')}
     <button class="addex" data-act="add-exercise">${I.plus}<span>exercice</span></button>`;
 }
 
-// Valeur choisie en noir, valeur proposée en gris.
-const val = (v, sug) => (v != null ? `<b>${fmt(v)}</b>` : `<b class="sug">${sug != null ? fmt(sug) : '–'}</b>`);
-
-function entryHTML(s, en) {
+function entryHTML(en) {
   const ex = exById(en.exerciseId) || { id: en.exerciseId, name: '?' };
-  const sug = suggestions(s, en);
+  const target = en.target
+    ? `<p class="target">${fmtTarget(en.target)}${goUp(en) ? '<span class="up">↑ monter</span>' : ''}</p>`
+    : '';
   const rows = en.sets.map((st, i) => `
-    <div class="set${st.done ? ' done' : ''}" data-i="${i}">
-      <div class="set-under" aria-hidden="true">supprimer</div>
+    <div class="set${isDone(st) ? ' done' : ''}" data-i="${i}">
+      <div class="set-under" aria-hidden="true"><i>${I.minus}</i></div>
       <div class="set-face">
-        <button class="vals" data-act="edit-set" aria-label="Série ${i + 1} : choisir la charge et les répétitions">
-          <span class="key">${val(st.w, sug[i].w)}</span><span class="unit">kg</span><span class="times">×</span><span class="key r">${val(st.r, sug[i].r)}</span>
+        <button class="vals" data-act="edit-set" aria-label="Série ${i + 1} : ${st.w ?? '?'} kilos, ${st.r ?? '?'} répétitions">
+          <span class="w${st.w == null ? ' nil' : ''}">${fmt(st.w)}</span><span class="u">kg</span><span class="x">×</span><span class="r${st.r == null ? ' nil' : ''}">${fmt(st.r)}</span>
         </button>
-        <button class="dot" data-act="toggle-set" role="switch" aria-checked="${st.done}" aria-label="Série ${i + 1} faite"><i></i></button>
+        <button class="dot" data-act="toggle-set" role="switch" aria-checked="${isDone(st)}" aria-label="Série ${i + 1} faite"><i></i></button>
       </div>
     </div>`).join('');
   return `<section class="entry" data-entry="${en.id}">
     <div class="ehead">
-      <a class="ename" href="#/e/${ex.id}">${esc(ex.name)}</a>
+      <div><a class="ename" href="#/e/${ex.id}">${esc(ex.name)}</a>${target}</div>
       <button class="icon" data-act="entry-menu" aria-label="Options de l'exercice">${I.dots}</button>
     </div>
     ${rows}
@@ -300,7 +356,7 @@ function entryHTML(s, en) {
 
 function repaintEntry(en) {
   const el = $(`[data-entry="${en.id}"]`);
-  if (el) el.outerHTML = entryHTML(cur.session, en);
+  if (el) el.outerHTML = entryHTML(en);
 }
 
 const entryOf = el => cur.session.entries.find(x => x.id === el.closest('.entry').dataset.entry);
@@ -308,20 +364,13 @@ const setIndex = el => Number(el.closest('.set').dataset.i);
 
 function renderExercise(ex) {
   cur = { view: 'exercise', exercise: ex };
-  let best = null;
-  const rows = [];
-  for (const s of sortedSessions()) {
-    const sets = s.entries.filter(en => en.exerciseId === ex.id).flatMap(en => en.sets.filter(logged));
-    if (!sets.length) continue;
-    const t = topSet(sets);
-    if (!best || heavier(t, best)) best = t;
-    rows.push(`<a class="hrow" href="#/s/${s.id}">${sets.map(st => `<span>${esc(fmtSet(st))}</span>`).join('')}</a>`);
-  }
+  const all = workouts(ex.id);
+  const best = all.length ? topSet(all.flat()) : null;
   app.innerHTML = `
     <header class="top">${backBtn('/')}<button class="icon" data-act="exercise-menu" aria-label="Options de l'exercice">${I.dots}</button></header>
     <h1>${esc(ex.name)}</h1>
-    <p class="record">${best ? `record<b>${esc(fmtRecord(best))}</b>` : 'aucune série'}</p>
-    ${rows.join('')}`;
+    <p class="record">${best ? `record<b>${esc(fmtRecord(best))}</b>` : 'aucune série validée'}</p>
+    ${all.map(sets => `<div class="hrow">${sets.map(st => `<span>${esc(fmtSet(st))}</span>`).join('')}</div>`).join('')}`;
 }
 
 /* ---------- Feuilles ---------- */
@@ -406,13 +455,15 @@ const wheelHTML = (name, labels, sel) => `<div class="wheel ${name}" data-sel="$
   <div class="wpad"></div>${labels.map((l, i) => `<div class="witem${i === sel ? ' on' : ''}">${l}</div>`).join('')}<div class="wpad"></div>
 </div>`;
 const wheelIndex = w => clamp(Math.round(w.scrollTop / ROW), 0, w.children.length - 3);
+const mountWheels = wrap => wrap.querySelectorAll('.wheel').forEach(el => { el.scrollTop = Number(el.dataset.sel) * ROW; });
+const readWheels = () => [...document.querySelectorAll('#sheet .wheel')].map(wheelIndex);
 
-// Choisir charge et répétitions d'une série ; « then » s'exécute après validation.
+// Charge et répétitions d'une série ; « then » s'exécute après validation.
 function editSet(en, i, then) {
   const st = en.sets[i];
-  const sug = suggestions(cur.session, en)[i];
-  const w = clamp(Math.round((st.w ?? sug.w ?? 20) * 4) / 4, 0, 400.75);
-  const r = clamp(st.r ?? sug.r ?? 10, 1, 100);
+  const prev = en.sets[i - 1] || {};
+  const w = clamp(Math.round((st.w ?? prev.w ?? 20) * 4) / 4, 0, 400.75);
+  const r = clamp(st.r ?? prev.r ?? en.target?.min ?? 10, 1, 100);
   sheet({
     title: `${exName(en.exerciseId)} · série ${i + 1}`,
     body: `<div class="picker">
@@ -421,23 +472,50 @@ function editSet(en, i, then) {
       ${wheelHTML('dec', KG_DEC_LABELS, KG_DEC.indexOf(w - Math.floor(w)))}
       <span class="plabel">kg</span>
       <span class="plabel x">×</span>
-      ${wheelHTML('reps', REPS.map(String), r - 1)}
+      ${wheelHTML('reps', range(1, 100).map(String), r - 1)}
       <span class="plabel">rép</span>
     </div>`,
-    mount: wrap => wrap.querySelectorAll('.wheel').forEach(el => { el.scrollTop = Number(el.dataset.sel) * ROW; }),
-    read: () => {
-      const [k, d, n] = [...document.querySelectorAll('#sheet .wheel')].map(wheelIndex);
-      return { w: KG[k] + KG_DEC[d], r: REPS[n] };
-    },
+    mount: mountWheels,
+    read: () => { const [k, d, n] = readWheels(); return { w: KG[k] + KG_DEC[d], r: n + 1 }; },
     submit: {
       label: 'ok',
       run: v => {
+        const old = { w: st.w, r: st.r };
         Object.assign(st, v);
+        // Les séries suivantes suivent le changement de charge.
+        for (const o of en.sets.slice(i + 1)) {
+          if (isDone(o)) continue;
+          if (o.w == null && o.r == null) Object.assign(o, v);
+          else if (o.w === old.w) o.w = v.w;
+        }
+        if (isDone(st)) logUpdate(en.exerciseId, st);
         then?.();
         save();
         repaintEntry(en);
       },
     },
+  });
+}
+
+// Objectif d'un exercice : séries × fourchette de répétitions.
+function editTarget(en) {
+  const t = en.target || { sets: en.sets.length || 3, min: 8, max: 12 };
+  const reps = range(1, 50).map(String);
+  sheet({
+    title: `${exName(en.exerciseId)} · objectif`,
+    body: `<div class="picker">
+      <div class="band"></div>
+      ${wheelHTML('n', range(1, 10).map(String), clamp(t.sets, 1, 10) - 1)}
+      <span class="plabel x">×</span>
+      ${wheelHTML('n', reps, clamp(t.min ?? 8, 1, 50) - 1)}
+      <span class="plabel x">–</span>
+      ${wheelHTML('n', reps, clamp(t.max ?? 12, 1, 50) - 1)}
+      <span class="plabel">rép</span>
+    </div>`,
+    mount: mountWheels,
+    read: () => { const [n, a, b] = readWheels(); return { sets: n + 1, min: Math.min(a, b) + 1, max: Math.max(a, b) + 1 }; },
+    actions: en.target ? [{ label: 'sans objectif', run: () => { en.target = null; save(); repaintEntry(en); } }] : [],
+    submit: { label: 'ok', run: v => { en.target = v; save(); repaintEntry(en); } },
   });
 }
 
@@ -478,7 +556,11 @@ document.addEventListener('pointermove', e => {
   }
   const x = Math.min(0, dx);
   drag.face.style.transform = `translateX(${x}px)`;
-  drag.row.classList.toggle('armed', -x > drag.row.offsetWidth * 0.35);
+  const armed = -x > Math.min(140, drag.row.offsetWidth * 0.4);
+  if (armed !== drag.row.classList.contains('armed')) {
+    drag.row.classList.toggle('armed', armed);
+    if (armed) navigator.vibrate?.(8);
+  }
 });
 
 function endDrag(e) {
@@ -502,15 +584,21 @@ document.addEventListener('pointercancel', endDrag);
 function deleteSet(row) {
   const en = entryOf(row);
   const i = setIndex(row);
-  haptic();
   row.querySelector('.set-face').style.transform = 'translateX(-100%)';
   row.style.height = `${row.offsetHeight}px`;
   requestAnimationFrame(() => { row.style.height = '0px'; });
   setTimeout(() => {
     const [set] = en.sets.splice(i, 1);
+    const at = set.at;
+    const entry = isDone(set) ? logRemove(en.exerciseId, set) : null;
     save();
     repaintEntry(en);
-    toast('série supprimée', () => { en.sets.splice(i, 0, set); save(); repaintEntry(en); });
+    toast('Série supprimée', () => {
+      if (entry) { set.at = at; db.log.push(entry); }
+      en.sets.splice(i, 0, set);
+      save();
+      repaintEntry(en);
+    });
   }, 220);
 }
 
@@ -680,7 +768,7 @@ async function keepAwake(on) {
 
 async function exportData() {
   flush();
-  const name = `scu-${today()}.json`;
+  const name = `scu-${dayKey(Date.now())}.json`;
   const file = new File([JSON.stringify(db, null, 1)], name, { type: 'application/json' });
   if (navigator.canShare?.({ files: [file] })) {
     try { await navigator.share({ files: [file] }); return; } catch (err) { if (err.name === 'AbortError') return; }
@@ -700,12 +788,12 @@ $('#file').addEventListener('change', async e => {
   if (!f) return;
   let data;
   try { data = normalize(JSON.parse(await f.text())); } catch {
-    sheet({ message: 'fichier illisible', cancel: 'ok' });
+    sheet({ message: 'Fichier illisible.', cancel: 'ok' });
     return;
   }
   const n = data.sessions.length;
   sheet({
-    message: `remplacer toutes les données par ce fichier (${n} séance${n > 1 ? 's' : ''}) ?`,
+    message: `Remplacer toutes les données par ce fichier (${n} séance${n > 1 ? 's' : ''}) ?`,
     actions: [{
       label: 'remplacer',
       danger: true,
@@ -716,20 +804,21 @@ $('#file').addEventListener('change', async e => {
 
 /* ---------- Actions ---------- */
 
-function markDone(st) {
-  st.done = true;
-  timer.start(db.settings.rest);
-}
-
 const actions = {
   back: el => back(el.dataset.parent),
 
-  'new-session': () => {
-    const s = newSession();
-    db.sessions.push(s);
-    save();
-    go('/s/' + s.id);
-  },
+  'new-session': () => sheet({
+    input: { placeholder: 'nom de la séance' },
+    submit: {
+      label: 'créer',
+      run: name => {
+        const s = { id: uid(), name: clean(name), entries: [] };
+        db.sessions.push(s);
+        save();
+        go('/s/' + s.id);
+      },
+    },
+  }),
 
   'add-exercise': () => sheet({
     input: { placeholder: "nom de l'exercice", suggest: matchExercises },
@@ -746,7 +835,8 @@ const actions = {
 
   'add-set': el => {
     const en = entryOf(el);
-    en.sets.push({ w: null, r: null, done: false });
+    const last = en.sets[en.sets.length - 1];
+    en.sets.push({ w: last?.w ?? null, r: last?.r ?? null, at: null });
     save();
     repaintEntry(en);
   },
@@ -757,16 +847,15 @@ const actions = {
     const en = entryOf(el);
     const i = setIndex(el);
     const st = en.sets[i];
-    if (st.done) {
-      st.done = false;
-    } else {
-      const sug = suggestions(cur.session, en)[i];
-      const w = st.w ?? sug.w;
-      const r = st.r ?? sug.r;
+    const done = () => { logAdd(en.exerciseId, st); timer.start(db.settings.rest); };
+    if (isDone(st)) {
+      logRemove(en.exerciseId, st);
+    } else if (st.r == null) {
       // Rien à valider : on choisit d'abord les valeurs.
-      if (r == null) { editSet(en, i, () => markDone(st)); return; }
-      Object.assign(st, { w, r });
-      markDone(st);
+      editSet(en, i, done);
+      return;
+    } else {
+      done();
     }
     haptic();
     save();
@@ -778,13 +867,13 @@ const actions = {
     const en = entryOf(el);
     const i = s.entries.indexOf(en);
     const move = d => () => { s.entries.splice(i, 1); s.entries.splice(i + d, 0, en); save(); renderSession(s); };
-    const list = [];
+    const list = [{ label: 'objectif', run: () => editTarget(en) }];
     if (i > 0) list.push({ label: 'monter', run: move(-1) });
     if (i < s.entries.length - 1) list.push({ label: 'descendre', run: move(1) });
     list.push({
       label: "retirer l'exercice",
       danger: true,
-      confirm: en.sets.some(logged) ? `retirer ${exName(en.exerciseId)} et ses séries de cette séance ?` : null,
+      confirm: `Retirer ${exName(en.exerciseId)} de cette séance ? Son historique est conservé.`,
       confirmLabel: 'retirer',
       run: () => { s.entries.splice(s.entries.indexOf(en), 1); save(); renderSession(s); },
     });
@@ -794,22 +883,19 @@ const actions = {
   'session-menu': () => {
     const s = cur.session;
     sheet({
+      title: s.name || 'Sans titre',
       actions: [
         {
-          label: 'refaire cette séance',
-          run: () => {
-            const n = newSession();
-            n.name = s.name;
-            n.entries = s.entries.map(en => ({ id: uid(), exerciseId: en.exerciseId, sets: blankSets(Math.max(1, en.sets.filter(logged).length)) }));
-            db.sessions.push(n);
-            save();
-            replace('/s/' + n.id);
-          },
+          label: 'renommer',
+          run: () => sheet({
+            input: { value: s.name, placeholder: 'nom de la séance' },
+            submit: { label: 'enregistrer', run: v => { s.name = clean(v); save(); route(); } },
+          }),
         },
         {
           label: 'supprimer la séance',
           danger: true,
-          confirm: 'supprimer cette séance et toutes ses séries ?',
+          confirm: 'Supprimer cette séance ? L’historique des exercices est conservé.',
           confirmLabel: 'supprimer',
           run: () => { db.sessions = db.sessions.filter(x => x !== s); save(); back('/'); },
         },
@@ -819,7 +905,6 @@ const actions = {
 
   'exercise-menu': () => {
     const ex = cur.exercise;
-    const used = db.sessions.filter(s => s.entries.some(en => en.exerciseId === ex.id)).length;
     sheet({
       title: ex.name,
       actions: [
@@ -833,11 +918,12 @@ const actions = {
         {
           label: "supprimer l'exercice",
           danger: true,
-          confirm: `supprimer ${ex.name} de ${used > 1 ? `ses ${used} séances` : 'sa séance'}, avec toutes ses séries ?`,
+          confirm: `Supprimer ${ex.name} de toutes les séances, avec son historique ?`,
           confirmLabel: 'supprimer',
           run: () => {
             db.exercises = db.exercises.filter(x => x !== ex);
             for (const s of db.sessions) s.entries = s.entries.filter(en => en.exerciseId !== ex.id);
+            db.log = db.log.filter(e => e.ex !== ex.id);
             save();
             back('/');
           },
@@ -847,8 +933,8 @@ const actions = {
   },
 
   'app-menu': () => sheet({
-    title: 'sauvegarde',
-    message: 'les données restent sur ce téléphone.',
+    title: 'Sauvegarde',
+    message: 'Les données restent sur ce téléphone.',
     actions: [
       { label: 'exporter', run: exportData },
       { label: 'importer', run: () => $('#file').click() },
@@ -880,30 +966,12 @@ document.addEventListener('click', e => {
 });
 
 document.addEventListener('input', e => {
-  const el = e.target;
-  if (el.dataset.field === 'name') {
-    cur.session.name = el.value;
-    save();
-  } else if (el.matches('.sheet-input') && sheetState?.input?.suggest) {
-    paintSuggestions(el.value);
-  }
-});
-
-document.addEventListener('change', e => {
-  const el = e.target;
-  if (el.dataset.field === 'name') {
-    cur.session.name = el.value.trim();
-    el.value = cur.session.name;
-    save();
-  }
+  if (e.target.matches('.sheet-input') && sheetState?.input?.suggest) paintSuggestions(e.target.value);
 });
 
 document.addEventListener('keydown', e => {
-  const el = e.target;
   if (e.key === 'Escape' && sheetState) closeSheet();
-  if (e.key !== 'Enter') return;
-  if (el.matches('.sheet-input')) { e.preventDefault(); submitSheet(); }
-  else if (el.matches('.title')) el.blur();
+  if (e.key === 'Enter' && e.target.matches('.sheet-input')) { e.preventDefault(); submitSheet(); }
 });
 
 // Garde les feuilles au-dessus du clavier.
@@ -924,6 +992,8 @@ document.addEventListener('visibilitychange', () => {
     timer.tick();
     if (timer.remaining() > 0) keepAwake(true);
   }
+  // Le lendemain, les coches de la veille s'effacent.
+  if (dayKey(Date.now()) !== renderedDay && !sheetState) route();
   swReg?.update().catch(() => {});
 });
 window.addEventListener('pagehide', flush);
@@ -932,7 +1002,9 @@ window.addEventListener('pagehide', flush);
 
 let swReg = null;
 
+importProgramme();
 pruneExercises();
+flush();
 if (!location.hash || location.hash === '#') history.replaceState(null, '', '#/');
 navStack = [location.hash];
 route();

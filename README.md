@@ -2,13 +2,14 @@
 
 Carnet de musculation pour téléphone. Séances, exercices, séries, charges — et un minuteur de repos.
 
-- **Séance** : un nom et des exercices. Le `+` orange, puis `exercice` : on tape son nom, les exercices déjà faits sont proposés.
-- **Série** : toucher les chiffres ouvre des molettes (kg, décimale, répétitions). Toucher le rond valide la série et lance le repos.
-- Les chiffres en gris sont ceux de la dernière fois : un toucher sur le rond suffit pour les refaire.
+- **Séance** : une liste d'exercices qu'on refait. Chaque série garde la charge et les répétitions de la dernière fois.
+- **Série** : toucher les chiffres ouvre des molettes (kg, décimale, répétitions) ; changer la charge d'une série change aussi les suivantes. Toucher le rond valide la série et lance le repos. Les coches s'effacent d'elles-mêmes le lendemain.
+- **Objectif** (`···` → objectif) : séries × fourchette de répétitions, par exemple `3 × 8–10`. Quand toutes les séries de la dernière fois ont atteint le haut de la fourchette, **↑ monter** s'affiche jusqu'à ce qu'une charge plus lourde soit choisie.
 - Glisser une série vers la gauche la supprime (avec « annuler »).
 - **Repos** : `−` / `+` (15 s) règlent la durée par défaut à l'arrêt, ou le décompte en cours. Vibration et bip à la fin, écran maintenu allumé pendant le repos.
-- Toucher le nom d'un exercice affiche son historique et son record. Seules les séries validées comptent.
+- Toucher le nom d'un exercice affiche son historique et son record (séries validées).
 - Hors ligne. Aucune dépendance, aucun compte, aucun serveur : les données restent sur le téléphone. `···` en haut de l'accueil → exporter / importer une sauvegarde.
+- `programme.js` : programme ajouté une seule fois au premier lancement qui le trouve.
 
 ## Installer sur le téléphone
 
