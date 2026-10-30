@@ -13,12 +13,7 @@ const STEP = 15;                 // pas du minuteur, en secondes
 const REST_MAX = 600;
 const OVERTIME = 10 * 60 * 1000; // le dépassement s'affiche 10 min au plus
 const LATE = 4 * 3600 * 1000;    // une séance commencée tard reste cochée après minuit
-const ROW = 44;                  // hauteur d'un cran de molette, en px
 
-const KG = Array.from({ length: 401 }, (_, i) => i);
-const KG_DEC = [0, 0.25, 0.5, 0.75];
-const KG_DEC_LABELS = [',0', ',25', ',5', ',75'];
-const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 
 const I = {
   dots: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
@@ -46,6 +41,8 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 const num = v => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v * 100) / 100 : null);
 const fmt = n => (n == null ? '–' : String(n).replace('.', ','));
+const fmtIn = n => (n == null ? '' : String(n).replace('.', ','));
+const parseNum = str => { const t = str.trim().replace(',', '.'); return t ? num(parseFloat(t)) : null; };
 const clampRest = v => (Number(v) > 0 ? clamp(Math.round(v / STEP) * STEP, STEP, REST_MAX) : 90);
 
 const fmtSet = st => (st.w ? `${fmt(st.w)}×${st.r}` : `${st.r} rép`);
@@ -329,24 +326,26 @@ function renderSession(s) {
     <button class="addex" data-act="add-exercise">${I.plus}<span>exercice</span></button>`;
 }
 
+const targetHTML = en => `${fmtTarget(en.target)}${goUp(en) ? '<span class="up">↑ monter</span>' : ''}`;
+
 function entryHTML(en) {
   const ex = exById(en.exerciseId) || { id: en.exerciseId, name: '?' };
-  const target = en.target
-    ? `<p class="target">${fmtTarget(en.target)}${goUp(en) ? '<span class="up">↑ monter</span>' : ''}</p>`
-    : '';
+  const target = en.target ? `<p class="target">${targetHTML(en)}</p>` : '';
   const rows = en.sets.map((st, i) => `
     <div class="set${isDone(st) ? ' done' : ''}" data-i="${i}">
       <div class="set-under" aria-hidden="true"><i>${I.minus}</i></div>
       <div class="set-face">
-        <button class="vals" data-act="edit-set" aria-label="Série ${i + 1} : ${st.w ?? '?'} kilos, ${st.r ?? '?'} répétitions">
-          <span class="w${st.w == null ? ' nil' : ''}">${fmt(st.w)}</span><span class="u">kg</span><span class="x">×</span><span class="r${st.r == null ? ' nil' : ''}">${fmt(st.r)}</span>
-        </button>
+        <div class="vals">
+          <input class="num w" data-field="w" inputmode="decimal" autocomplete="off" value="${fmtIn(st.w)}" placeholder="–" aria-label="Charge en kilos, série ${i + 1}">
+          <span class="u">kg</span><span class="x">×</span>
+          <input class="num r" data-field="r" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${fmtIn(st.r)}" placeholder="–" aria-label="Répétitions, série ${i + 1}">
+        </div>
         <button class="dot" data-act="toggle-set" role="switch" aria-checked="${isDone(st)}" aria-label="Série ${i + 1} faite"><i></i></button>
       </div>
     </div>`).join('');
   return `<section class="entry" data-entry="${en.id}">
     <div class="ehead">
-      <div><a class="ename" href="#/e/${ex.id}">${esc(ex.name)}</a>${target}</div>
+      <div><a class="ename" href="#/e/${ex.id}" draggable="false">${esc(ex.name)}</a>${target}</div>
       <button class="icon" data-act="entry-menu" aria-label="Options de l'exercice">${I.dots}</button>
     </div>
     ${rows}
@@ -394,13 +393,12 @@ function sheet(opts) {
     </div>
   </div>`;
   const wrap = root.firstElementChild;
-  opts.mount?.(wrap);
-  if (opts.input) {
+  const focusEl = opts.input ? $('.sheet-input', root) : opts.focus ? $(opts.focus, root) : null;
+  if (focusEl) {
     // Ouverte d'emblée : le clavier ne s'affiche que si le focus est pris pendant le geste.
     wrap.classList.add('open');
-    const input = $('.sheet-input', root);
-    input.focus();
-    input.setSelectionRange(input.value.length, input.value.length);
+    focusEl.focus();
+    focusEl.setSelectionRange?.(focusEl.value.length, focusEl.value.length);
   } else {
     requestAnimationFrame(() => requestAnimationFrame(() => wrap.classList.add('open')));
   }
@@ -449,213 +447,77 @@ function paintSuggestions(q) {
     .join('');
 }
 
-/* ---------- Molettes ---------- */
+/* ---------- Objectif ---------- */
 
-// Molettes dessinées à la main (glisser, lancer, toucher une valeur) : le défilement
-// natif d'iOS dans une feuille est saccadé et se mélange à celui de la page.
-const wheels = new WeakMap();
-const wheelHTML = (name, labels, sel) => `<div class="wheel ${name}" data-sel="${sel}">
-  <div class="wlist">${labels.map((l, i) => `<div class="witem${i === sel ? ' on' : ''}">${l}</div>`).join('')}</div>
-</div>`;
-
-function mountWheels(wrap) {
-  wrap.querySelectorAll('.wheel').forEach(el => {
-    const list = el.firstElementChild;
-    const w = { el, list, n: list.children.length, pos: Number(el.dataset.sel), sel: Number(el.dataset.sel), target: null, anim: 0 };
-    wheels.set(el, w);
-    paintWheel(w);
-  });
-}
-
-function paintWheel(w) {
-  w.list.style.transform = `translate3d(0, ${2 * ROW - w.pos * ROW}px, 0)`;
-  const i = clamp(Math.round(w.pos), 0, w.n - 1);
-  if (i !== w.sel) {
-    w.list.children[w.sel].classList.remove('on');
-    w.list.children[i].classList.add('on');
-    w.sel = i;
-  }
-}
-
-// Amène la molette sur un cran, en ralentissant.
-function settle(w, to) {
-  cancelAnimationFrame(w.anim);
-  w.target = clamp(Math.round(to), 0, w.n - 1);
-  const from = w.pos;
-  const d = w.target - from;
-  const dur = clamp(160 + Math.sqrt(Math.abs(d)) * 90, 160, 900);
-  const t0 = performance.now();
-  const step = now => {
-    const k = Math.min(1, (now - t0) / dur);
-    w.pos = from + d * (1 - (1 - k) ** 3);
-    paintWheel(w);
-    if (k < 1) w.anim = requestAnimationFrame(step);
-    else w.target = null;
-  };
-  w.anim = requestAnimationFrame(step);
-}
-
-const readWheels = () => [...document.querySelectorAll('#sheet .wheel')].map(el => {
-  const w = wheels.get(el);
-  return w.target ?? w.sel;
-});
-
-let wdrag = null;
-
-document.addEventListener('pointerdown', e => {
-  const el = e.target.closest('.wheel');
-  const w = el && wheels.get(el);
-  if (!w || e.button > 0) return;
-  cancelAnimationFrame(w.anim);
-  w.target = null;
-  el.setPointerCapture?.(e.pointerId);
-  wdrag = { w, id: e.pointerId, y: e.clientY, pos: w.pos, moved: false, track: [[e.timeStamp, e.clientY]] };
-});
-
-document.addEventListener('pointermove', e => {
-  if (!wdrag || e.pointerId !== wdrag.id) return;
-  const { w } = wdrag;
-  const dy = e.clientY - wdrag.y;
-  if (Math.abs(dy) > 4) wdrag.moved = true;
-  let p = wdrag.pos - dy / ROW;
-  if (p < 0) p /= 3;                              // résistance aux extrémités
-  if (p > w.n - 1) p = w.n - 1 + (p - w.n + 1) / 3;
-  w.pos = p;
-  paintWheel(w);
-  wdrag.track.push([e.timeStamp, e.clientY]);
-  if (wdrag.track.length > 6) wdrag.track.shift();
-});
-
-function endWheel(e) {
-  if (!wdrag || e.pointerId !== wdrag.id) return;
-  const { w, moved, track } = wdrag;
-  wdrag = null;
-  if (!moved) {
-    // Toucher une valeur : la molette s'y place.
-    const r = w.el.getBoundingClientRect();
-    settle(w, w.pos + (e.clientY - r.top - r.height / 2) / ROW);
-    return;
-  }
-  const [t0, y0] = track[0];
-  const [t1, y1] = track[track.length - 1];
-  const v = t1 - t0 > 0 && e.timeStamp - t1 < 80 ? (y1 - y0) / (t1 - t0) : 0; // px/ms
-  settle(w, w.pos - (v * 260) / ROW);
-}
-document.addEventListener('pointerup', endWheel);
-document.addEventListener('pointercancel', endWheel);
-
-// Molette de souris ou pavé tactile sur ordinateur.
-document.addEventListener('wheel', e => {
-  const el = e.target.closest?.('.wheel');
-  const w = el && wheels.get(el);
-  if (!w) return;
-  e.preventDefault();
-  cancelAnimationFrame(w.anim);
-  w.pos = clamp(w.pos + e.deltaY / ROW, 0, w.n - 1);
-  paintWheel(w);
-  clearTimeout(w.idle);
-  w.idle = setTimeout(() => settle(w, w.pos), 90);
-}, { passive: false });
-
-// Charge et répétitions d'une série ; « then » s'exécute après validation.
-function editSet(en, i, then) {
-  const st = en.sets[i];
-  const prev = en.sets[i - 1] || {};
-  const w = clamp(Math.round((st.w ?? prev.w ?? 20) * 4) / 4, 0, 400.75);
-  const r = clamp(st.r ?? prev.r ?? en.target?.min ?? 10, 1, 100);
-  sheet({
-    title: `${exName(en.exerciseId)} · série ${i + 1}`,
-    body: `<div class="picker">
-      <div class="band"></div>
-      ${wheelHTML('kg', KG.map(String), Math.floor(w))}
-      ${wheelHTML('dec', KG_DEC_LABELS, KG_DEC.indexOf(w - Math.floor(w)))}
-      <span class="plabel">kg</span>
-      <span class="plabel x">×</span>
-      ${wheelHTML('reps', range(1, 100).map(String), r - 1)}
-      <span class="plabel">rép</span>
-    </div>`,
-    mount: mountWheels,
-    read: () => { const [k, d, n] = readWheels(); return { w: KG[k] + KG_DEC[d], r: n + 1 }; },
-    submit: {
-      label: 'ok',
-      run: v => {
-        const old = { w: st.w, r: st.r };
-        Object.assign(st, v);
-        // Les séries suivantes suivent le changement de charge.
-        for (const o of en.sets.slice(i + 1)) {
-          if (isDone(o)) continue;
-          if (o.w == null && o.r == null) Object.assign(o, v);
-          else if (o.w === old.w) o.w = v.w;
-        }
-        if (isDone(st)) logUpdate(en.exerciseId, st);
-        then?.();
-        save();
-        repaintEntry(en);
-      },
-    },
-  });
-}
-
-// Objectif d'un exercice : séries × fourchette de répétitions.
+// Séries × fourchette de répétitions, au clavier numérique.
 function editTarget(en) {
-  const t = en.target || { sets: en.sets.length || 3, min: 8, max: 12 };
-  const reps = range(1, 50).map(String);
+  const t = en.target || {};
+  const field = (k, v) => `<input data-t="${k}" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${v ?? ''}" placeholder="–">`;
   sheet({
     title: `${exName(en.exerciseId)} · objectif`,
-    body: `<div class="picker">
-      <div class="band"></div>
-      ${wheelHTML('n', range(1, 10).map(String), clamp(t.sets, 1, 10) - 1)}
-      <span class="plabel x">×</span>
-      ${wheelHTML('n', reps, clamp(t.min ?? 8, 1, 50) - 1)}
-      <span class="plabel x">–</span>
-      ${wheelHTML('n', reps, clamp(t.max ?? 12, 1, 50) - 1)}
-      <span class="plabel">rép</span>
-    </div>`,
-    mount: mountWheels,
-    read: () => { const [n, a, b] = readWheels(); return { sets: n + 1, min: Math.min(a, b) + 1, max: Math.max(a, b) + 1 }; },
+    body: `<div class="tgt">${field('sets', t.sets)}<span>×</span>${field('min', t.min)}<span>–</span>${field('max', t.max)}<span>rép</span></div>`,
+    focus: '.tgt input',
+    read: () => {
+      const [n, a, b] = [...document.querySelectorAll('#sheet .tgt input')].map(i => Math.round(parseNum(i.value) ?? 0));
+      if (!(n >= 1) || !(a >= 1 || b >= 1)) return null;
+      const lo = Math.min(a || b, b || a);
+      return { sets: n, min: lo, max: Math.max(a, b, lo) };
+    },
     actions: en.target ? [{ label: 'sans objectif', run: () => { en.target = null; save(); repaintEntry(en); } }] : [],
-    submit: { label: 'ok', run: v => { en.target = v; save(); repaintEntry(en); } },
+    submit: { label: 'ok', run: v => { if (v) { en.target = v; save(); repaintEntry(en); } } },
   });
 }
 
 /* ---------- Gestes : glisser pour supprimer, appui long pour réordonner ---------- */
 
-const HOLD = 420;                // durée de l'appui long, en ms
+// Événements tactiles plutôt que pointeur : sur iOS, un appui long sur un lien
+// ou un début de défilement interrompt les événements pointeur en plein geste.
+const HOLD = 400;                // durée de l'appui long, en ms
 let g = null;
 let swallowUntil = 0;
+let lastTouch = 0;
 let toastUndo = null;
 let toastTimer = 0;
 
-document.addEventListener('pointerdown', e => {
-  if (g || e.button > 0 || e.target.closest('.wheel, .sheet-wrap')) return;
+const pt = e => (e.changedTouches ? e.changedTouches[0] : e);
+
+function gestureStart(e) {
+  if (e.type === 'mousedown' && (e.button > 0 || Date.now() - lastTouch < 800)) return;
+  if (e.touches) {
+    lastTouch = Date.now();
+    if (e.touches.length > 1) { cancelGesture(); return; }
+  }
+  if (g || e.target.closest('.sheet-wrap, .dot, .icon')) return;
   const face = e.target.closest('.set-face');
   const head = !face && e.target.closest('.ehead');
   if (!face && !head) return;
+  const p = pt(e);
   g = {
     kind: face ? 'set' : 'entry',
     face,
     item: face ? face.closest('.set') : head.closest('.entry'),
-    id: e.pointerId,
-    x: e.clientX,
-    y: e.clientY,
+    x: p.clientX,
+    y: p.clientY,
     mode: 'wait',
   };
   g.timer = setTimeout(startSort, HOLD);
-});
+}
 
-document.addEventListener('pointermove', e => {
-  if (!g || e.pointerId !== g.id) return;
-  const dx = e.clientX - g.x;
-  const dy = e.clientY - g.y;
+function gestureMove(e) {
+  if (!g) return;
+  const p = pt(e);
+  const dx = p.clientX - g.x;
+  const dy = p.clientY - g.y;
   if (g.mode === 'wait') {
     if (Math.hypot(dx, dy) < 10) return;
     clearTimeout(g.timer);
     if (g.kind !== 'set' || dx > 0 || Math.abs(dx) < Math.abs(dy)) { g = null; return; }
     g.mode = 'swipe';
-    g.face.setPointerCapture?.(g.id);
+    document.activeElement?.blur();
     g.item.classList.add('swiping');
   }
-  if (g.mode === 'sort') { moveSort(e.clientY); return; }
+  if (e.cancelable) e.preventDefault();          // la page ne défile pas pendant le geste
+  if (g.mode === 'sort') { moveSort(p.clientY); return; }
   const x = Math.min(0, dx);
   g.face.style.transform = `translateX(${x}px)`;
   const armed = -x > Math.min(140, g.item.offsetWidth * 0.4);
@@ -663,30 +525,46 @@ document.addEventListener('pointermove', e => {
     g.item.classList.toggle('armed', armed);
     if (armed) navigator.vibrate?.(8);
   }
-});
+}
 
-function endGesture(e) {
-  if (!g || e.pointerId !== g.id) return;
+function gestureEnd(e) {
+  if (!g) return;
   const s = g;
   g = null;
   clearTimeout(s.timer);
   if (s.mode === 'wait') return;
+  // Ni clic ni clavier après un geste.
+  if (e.cancelable) e.preventDefault();
   swallowUntil = Date.now() + 400;
   if (s.mode === 'sort') { finishSort(s); return; }
   s.item.classList.remove('swiping');
-  if (e.type === 'pointerup' && s.item.classList.contains('armed')) {
+  if (e.type !== 'touchcancel' && s.item.classList.contains('armed')) {
     deleteSet(s.item);
   } else {
     s.face.style.transform = '';
     s.item.classList.remove('armed');
   }
 }
-document.addEventListener('pointerup', endGesture);
-document.addEventListener('pointercancel', endGesture);
 
-// Pendant un geste (et dans les feuilles), la page ne défile pas.
+function cancelGesture() {
+  if (!g) return;
+  gestureEnd({ type: 'touchcancel' });
+}
+
+document.addEventListener('touchstart', gestureStart, { passive: true });
+document.addEventListener('touchmove', gestureMove, { passive: false });
+document.addEventListener('touchend', gestureEnd, { passive: false });
+document.addEventListener('touchcancel', gestureEnd, { passive: false });
+document.addEventListener('mousedown', gestureStart);
+document.addEventListener('mousemove', e => { if (g) gestureMove(e); });
+document.addEventListener('mouseup', gestureEnd);
+// Pas de menu ni de glisser-déposer natif sur les liens pendant l'appui long.
+document.addEventListener('contextmenu', e => { if (g || e.target.closest('.ehead, .set')) e.preventDefault(); });
+document.addEventListener('dragstart', e => e.preventDefault());
+
+// Dans une feuille ouverte, la page derrière ne défile pas.
 document.addEventListener('touchmove', e => {
-  if ((g && g.mode !== 'wait') || wdrag || e.target.closest?.('.sheet-wrap')) e.preventDefault();
+  if (e.cancelable && e.target.closest?.('.sheet-wrap') && !e.target.closest('.sugg')) e.preventDefault();
 }, { passive: false });
 
 // Appui long : la série, ou l'exercice (la liste se replie sur les noms), suit le doigt.
@@ -694,16 +572,19 @@ function startSort() {
   const s = g;
   if (!s || s.mode !== 'wait') return;
   s.mode = 'sort';
-  (s.face || s.item).setPointerCapture?.(s.id);
+  document.activeElement?.blur();
   navigator.vibrate?.(15);
-  if (s.kind === 'entry') app.classList.add('sorting');
+  if (s.kind === 'entry') {
+    app.classList.add('sorting');
+    // Après repli, l'exercice revient sous le doigt.
+    const r = s.item.getBoundingClientRect();
+    scrollBy(0, r.top + r.height / 2 - s.y);
+  }
   s.list = [...s.item.parentElement.querySelectorAll(s.kind === 'set' ? ':scope > .set' : ':scope > .entry')];
   s.from = s.to = s.list.indexOf(s.item);
-  s.rects = s.list.map(el => { const r = el.getBoundingClientRect(); return { top: r.top + scrollY, h: r.height }; });
-  const n = s.rects.length;
-  s.step = n > 1 ? (s.rects[n - 1].top - s.rects[0].top) / (n - 1) : 0;
-  const r = s.rects[s.from];
-  s.grab = s.kind === 'set' ? s.y + scrollY - (r.top + r.h / 2) : 0;
+  s.rects = s.list.map(el => { const r = el.getBoundingClientRect(); return { mid: r.top + scrollY + r.height / 2, h: r.height }; });
+  // Une série garde sa prise ; un exercice replié se place sous le doigt.
+  s.grab = s.kind === 'set' ? s.y + scrollY - s.rects[s.from].mid : 0;
   s.item.classList.add('lifted');
   moveSort(s.y);
   s.raf = requestAnimationFrame(autoScroll);
@@ -712,16 +593,17 @@ function startSort() {
 function moveSort(y) {
   const s = g;
   s.lastY = y;
-  const r = s.rects[s.from];
   const center = y + scrollY - s.grab;
-  s.item.style.transform = `translate3d(0, ${center - (r.top + r.h / 2)}px, 0)`;
+  s.item.style.transform = `translate3d(0, ${center - s.rects[s.from].mid}px, 0)`;
   let to = 0;
-  s.rects.forEach((q, j) => { if (j !== s.from && q.top + q.h / 2 < center) to++; });
+  s.rects.forEach((q, j) => { if (j !== s.from && q.mid < center) to++; });
   if (to === s.to) return;
   s.to = to;
+  // Les voisins s'écartent exactement de la hauteur de l'élément porté.
+  const h = s.rects[s.from].h;
   s.list.forEach((el, j) => {
     if (j === s.from) return;
-    const shift = s.from < to && j > s.from && j <= to ? -s.step : s.from > to && j >= to && j < s.from ? s.step : 0;
+    const shift = s.from < to && j > s.from && j <= to ? -h : s.from > to && j >= to && j < s.from ? h : 0;
     el.style.transform = shift ? `translate3d(0, ${shift}px, 0)` : '';
   });
   navigator.vibrate?.(5);
@@ -748,8 +630,8 @@ function finishSort(s) {
     list.splice(s.to, 0, moved);
     save();
   }
-  app.classList.remove('sorting');
   if (en) { repaintEntry(en); return; }
+  app.classList.remove('sorting');
   renderSession(cur.session);
   $(`[data-entry="${moved.id}"]`)?.scrollIntoView({ block: 'center' });
 }
@@ -1014,21 +896,19 @@ const actions = {
     repaintEntry(en);
   },
 
-  'edit-set': el => editSet(entryOf(el), setIndex(el)),
-
   'toggle-set': el => {
     const en = entryOf(el);
     const i = setIndex(el);
     const st = en.sets[i];
-    const done = () => { logAdd(en.exerciseId, st); timer.start(db.settings.rest); };
     if (isDone(st)) {
       logRemove(en.exerciseId, st);
     } else if (st.r == null) {
-      // Rien à valider : on choisit d'abord les valeurs.
-      editSet(en, i, done);
+      // Rien à valider : on tape d'abord les valeurs.
+      el.closest('.set').querySelector(`[data-field="${st.w == null ? 'w' : 'r'}"]`).focus();
       return;
     } else {
-      done();
+      logAdd(en.exerciseId, st);
+      timer.start(db.settings.rest);
     }
     haptic();
     save();
@@ -1129,12 +1009,69 @@ document.addEventListener('click', e => {
 });
 
 document.addEventListener('input', e => {
-  if (e.target.matches('.sheet-input') && sheetState?.input?.suggest) paintSuggestions(e.target.value);
+  const el = e.target;
+  const f = el.dataset.field;
+  if (f === 'w' || f === 'r') {
+    const en = entryOf(el);
+    const st = en.sets[setIndex(el)];
+    let n = parseNum(el.value);
+    if (f === 'r' && n != null) n = Math.round(n);
+    st[f] = n;
+    if (isDone(st)) logUpdate(en.exerciseId, st);
+    save();
+  } else if (el.matches('.sheet-input') && sheetState?.input?.suggest) {
+    paintSuggestions(el.value);
+  }
+});
+
+// En quittant un champ : valeur remise au propre, séries suivantes mises à jour.
+document.addEventListener('change', e => {
+  const el = e.target;
+  const f = el.dataset.field;
+  if (f !== 'w' && f !== 'r') return;
+  const sec = el.closest('.entry');
+  const en = entryOf(el);
+  const i = setIndex(el);
+  const v = en.sets[i][f];
+  el.value = fmtIn(v);
+  const old = el.dataset.old === '' ? null : Number(el.dataset.old);
+  en.sets.slice(i + 1).forEach((o, k) => {
+    if (isDone(o) || v == null) return;
+    // La charge suit si elle était identique ; les cases vides se remplissent.
+    if (o[f] == null || (f === 'w' && o.w === old)) {
+      o[f] = v;
+      sec.querySelector(`.set[data-i="${i + 1 + k}"] [data-field="${f}"]`).value = fmtIn(v);
+    }
+  });
+  save();
+  const t = sec.querySelector('.target');
+  if (t && en.target) t.innerHTML = targetHTML(en);
+});
+
+document.addEventListener('focusin', e => {
+  const el = e.target;
+  if (!el.matches('.num, .tgt input')) return;
+  if (el.matches('.num')) {
+    const st = entryOf(el).sets[setIndex(el)];
+    el.dataset.old = st[el.dataset.field] ?? '';
+  }
+  el._focusedAt = Date.now();
+  selectAll(el);
+});
+
+// Toucher un champ sélectionne sa valeur : taper la remplace. Refait après le toucher,
+// qui place sinon le curseur à l'endroit touché.
+const selectAll = el => setTimeout(() => { try { el.setSelectionRange(0, el.value.length); } catch {} }, 0);
+document.addEventListener('mouseup', e => {
+  const el = e.target;
+  if (el.matches?.('.num, .tgt input') && Date.now() - (el._focusedAt || 0) < 500) selectAll(el);
 });
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && sheetState) closeSheet();
-  if (e.key === 'Enter' && e.target.matches('.sheet-input')) { e.preventDefault(); submitSheet(); }
+  if (e.key !== 'Enter') return;
+  if (e.target.matches('#sheet input')) { e.preventDefault(); submitSheet(); }
+  else if (e.target.matches('.num')) e.target.blur();
 });
 
 // Garde les feuilles au-dessus du clavier.
