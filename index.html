@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#EEEDE9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121211" media="(prefers-color-scheme: dark)">
+<meta name="description" content="Séances, exercices, séries, charges.">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="SCU">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>SCU</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<main id="app"></main>
+
+<div id="timer" class="timer" hidden>
+  <div class="tprog"></div>
+  <div class="tbar">
+    <div class="tread">
+      <span class="label">Repos</span>
+      <span class="ttime" id="ttime" role="timer">1:30</span>
+    </div>
+    <button class="tadj" data-act="t-minus" aria-label="Moins 15 secondes">−15</button>
+    <button class="tadj" data-act="t-plus" aria-label="Plus 15 secondes">+15</button>
+    <button class="tgo" id="tgo" data-act="t-toggle" aria-label="Démarrer"></button>
+  </div>
+</div>
+
+<div id="sheet"></div>
+<input type="file" id="file" accept="application/json,.json" hidden>
+</body>
+</html>
