@@ -22,12 +22,14 @@
 <main id="app"></main>
 
 <section id="timer" class="timer" hidden aria-label="Repos">
-  <div class="tprog"></div>
+  <div class="ruler" aria-hidden="true"><div class="rfill"></div><i class="needle"></i></div>
   <div class="trow">
-    <span class="tclock" id="tclock" role="timer">1:30</span>
     <button class="tkey" data-act="t-minus" aria-label="Moins 15 secondes">−</button>
+    <button class="tgo" id="tgo" data-act="t-toggle" aria-label="Démarrer le repos">
+      <span class="tclock" id="tclock" role="timer">01:30</span>
+      <span class="tstate" id="tstate">démarrer</span>
+    </button>
     <button class="tkey" data-act="t-plus" aria-label="Plus 15 secondes">+</button>
-    <button class="tgo" id="tgo" data-act="t-toggle" aria-label="Démarrer le repos"></button>
   </div>
 </section>
 

@@ -20,8 +20,6 @@ const I = {
   back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5v15M4.5 12h15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   minus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 12h13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
-  play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13a.7.7 0 0 0 1.05.6l10.4-6.5a.7.7 0 0 0 0-1.2L9.05 4.9A.7.7 0 0 0 8 5.5z"/></svg>',
-  stop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg>',
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -302,26 +300,38 @@ const backBtn = parent => `<button class="icon" data-act="back" data-parent="${e
 
 /* ---------- Écrans ---------- */
 
+// « Séance 1 — Poussée & jambes » → petite étiquette « Séance 1 », titre « Poussée & jambes ».
+function splitName(name) {
+  const m = /^(.*\d)\s*[—–-]\s*(.+)$/.exec(name || '');
+  return m ? { tag: m[1], title: m[2] } : { tag: '', title: name || 'Sans titre' };
+}
+
 function renderSessions() {
   pruneExercises();
   cur = { view: 'sessions' };
-  const rows = db.sessions.map(s => `
-    <a class="srow" href="#/s/${s.id}">
-      <span>${esc(s.name || 'Sans titre')}</span>
-      ${s.entries.some(en => en.sets.some(isDone)) ? '<i class="live" aria-label="en cours"></i>' : ''}
-    </a>`).join('');
+  const cards = db.sessions.map(s => {
+    const { tag, title } = splitName(s.name);
+    const live = s.entries.some(en => en.sets.some(isDone));
+    return `<a class="card${live ? ' live' : ''}" href="#/s/${s.id}">
+      ${tag ? `<span class="tag">${esc(tag)}</span>` : ''}
+      <span class="ctitle">${esc(title)}</span>
+      <span class="cfoot"><span class="tag">${live ? 'en cours' : 'exercices'}</span><span class="big">${pad(s.entries.length)}</span></span>
+    </a>`;
+  }).join('');
   app.innerHTML = `
     <header class="top"><span></span><button class="icon" data-act="app-menu" aria-label="Sauvegarde">${I.dots}</button></header>
-    <h1>Séances</h1>
-    <nav class="slist">${rows || '<p class="empty">Aucune séance.</p>'}</nav>
+    <h1 class="hero">Séances<sup>${db.sessions.length}</sup></h1>
+    <nav class="cards">${cards || '<p class="empty">Aucune séance.</p>'}</nav>
     <button class="fab" data-act="new-session" aria-label="Nouvelle séance">${I.plus}</button>`;
 }
 
 function renderSession(s) {
   cur = { view: 'session', session: s };
+  const { tag, title } = splitName(s.name);
   app.innerHTML = `
     <header class="top">${backBtn('/')}<button class="icon" data-act="session-menu" aria-label="Options de la séance">${I.dots}</button></header>
-    <h1>${esc(s.name || 'Sans titre')}</h1>
+    ${tag ? `<p class="tag">${esc(tag)}</p>` : ''}
+    <h1 class="hero">${esc(title)}</h1>
     ${s.entries.map(entryHTML).join('')}
     <button class="addex" data-act="add-exercise">${I.plus}<span>exercice</span></button>`;
 }
@@ -343,9 +353,11 @@ function entryHTML(en) {
         <button class="dot" data-act="toggle-set" role="switch" aria-checked="${isDone(st)}" aria-label="Série ${i + 1} faite"><i></i></button>
       </div>
     </div>`).join('');
-  return `<section class="entry" data-entry="${en.id}">
+  const done = en.sets.filter(isDone).length;
+  return `<section class="entry${done && done === en.sets.length ? ' complete' : ''}" data-entry="${en.id}">
     <div class="ehead">
       <div><a class="ename" href="#/e/${ex.id}" draggable="false">${esc(ex.name)}</a>${target}</div>
+      <span class="count" aria-label="${done} séries faites sur ${en.sets.length}">${done}<small>/${en.sets.length}</small></span>
       <button class="icon" data-act="entry-menu" aria-label="Options de l'exercice">${I.dots}</button>
     </div>
     ${rows}
@@ -365,10 +377,14 @@ function renderExercise(ex) {
   cur = { view: 'exercise', exercise: ex };
   const all = workouts(ex.id);
   const best = all.length ? topSet(all.flat()) : null;
+  const record = !best ? '<span class="big faint">–</span>'
+    : best.w ? `<span class="big">${fmt(best.w)}</span><span class="unit">kg × ${best.r}</span>`
+    : `<span class="big">${best.r}</span><span class="unit">rép</span>`;
   app.innerHTML = `
     <header class="top">${backBtn('/')}<button class="icon" data-act="exercise-menu" aria-label="Options de l'exercice">${I.dots}</button></header>
-    <h1>${esc(ex.name)}</h1>
-    <p class="record">${best ? `record<b>${esc(fmtRecord(best))}</b>` : 'aucune série validée'}</p>
+    <h1 class="hero">${esc(ex.name)}</h1>
+    <div class="record"><span class="tag">record</span><div>${record}</div></div>
+    ${all.length ? `<p class="tag hlabel">séances<sup>${all.length}</sup></p>` : ''}
     ${all.map(sets => `<div class="hrow">${sets.map(st => `<span>${esc(fmtSet(st))}</span>`).join('')}</div>`).join('')}`;
 }
 
@@ -487,7 +503,7 @@ function gestureStart(e) {
     lastTouch = Date.now();
     if (e.touches.length > 1) { cancelGesture(); return; }
   }
-  if (g || e.target.closest('.sheet-wrap, .dot, .icon')) return;
+  if (g || e.target.closest('.sheet-wrap, .icon')) return;
   const face = e.target.closest('.set-face');
   const head = !face && e.target.closest('.ehead');
   if (!face && !head) return;
@@ -584,6 +600,8 @@ function startSort() {
   s.from = s.to = s.list.indexOf(s.item);
   s.rects = s.list.map(el => { const r = el.getBoundingClientRect(); return { mid: r.top + scrollY + r.height / 2, h: r.height }; });
   // Une série garde sa prise ; un exercice replié se place sous le doigt.
+  const [a, b] = s.rects;
+  s.gap = b ? b.mid - a.mid - (a.h + b.h) / 2 : 0; // espace entre deux cartes
   s.grab = s.kind === 'set' ? s.y + scrollY - s.rects[s.from].mid : 0;
   s.item.classList.add('lifted');
   moveSort(s.y);
@@ -599,8 +617,8 @@ function moveSort(y) {
   s.rects.forEach((q, j) => { if (j !== s.from && q.mid < center) to++; });
   if (to === s.to) return;
   s.to = to;
-  // Les voisins s'écartent exactement de la hauteur de l'élément porté.
-  const h = s.rects[s.from].h;
+  // Les voisins s'écartent exactement de la place de l'élément porté.
+  const h = s.rects[s.from].h + s.gap;
   s.list.forEach((el, j) => {
     if (j === s.from) return;
     const shift = s.from < to && j > s.from && j <= to ? -h : s.from > to && j >= to && j < s.from ? h : 0;
@@ -680,7 +698,9 @@ function hideToast() {
 const timerEl = $('#timer');
 const tClock = $('#tclock');
 const tGo = $('#tgo');
-const tProg = $('.tprog');
+const tState = $('#tstate');
+const rFill = $('.rfill');
+const needle = $('.needle');
 let actx = null;
 let wakeLock = null;
 
@@ -759,18 +779,20 @@ function paintTimer() {
   const rem = run ? timer.remaining() : db.settings.rest * 1000;
   const over = run && rem <= 0;
   const secs = over ? Math.floor(-rem / 1000) : Math.ceil(rem / 1000);
-  const text = `${over ? '+' : ''}${Math.floor(secs / 60)}:${pad(secs % 60)}`;
-  if (tClock.textContent !== text) tClock.textContent = text;
-  tProg.style.transform = `scaleX(${run && !over ? Math.min(1, rem / (timer.dur * 1000)) : 0})`;
+  // 01:30 — le zéro de tête en retrait.
+  const mm = pad(Math.floor(secs / 60));
+  const html = `${over ? '+' : ''}${mm[0] === '0' ? `<span class="z">0</span>${mm[1]}` : mm}:${pad(secs % 60)}`;
+  if (tClock.innerHTML !== html) tClock.innerHTML = html;
+  const state = over ? 'terminé' : run ? 'arrêter' : 'démarrer';
+  if (tState.textContent !== state) tState.textContent = state;
+  tGo.setAttribute('aria-label', run ? 'Arrêter le repos' : 'Démarrer le repos');
+
+  // L'aiguille avance sur la règle au fil du repos.
+  const elapsed = over ? 1 : run ? clamp(1 - rem / (timer.dur * 1000), 0, 1) : 0;
+  rFill.style.clipPath = `inset(0 ${(100 - elapsed * 100).toFixed(2)}% 0 0)`;
+  needle.style.left = `${(elapsed * 100).toFixed(2)}%`;
   timerEl.classList.toggle('run', run);
   timerEl.classList.toggle('over', over);
-
-  const state = run ? 'stop' : 'play';
-  if (tGo.dataset.state !== state) {
-    tGo.dataset.state = state;
-    tGo.innerHTML = I[state];
-    tGo.setAttribute('aria-label', run ? 'Arrêter le repos' : 'Démarrer le repos');
-  }
 
   const show = cur.view === 'session' || (run && cur.view === 'exercise');
   timerEl.hidden = !show;
