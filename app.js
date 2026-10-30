@@ -8,6 +8,13 @@ const TIMER_KEY = 'scu.timer';
 const STEP = 15;                 // pas du minuteur, en secondes
 const REST_MAX = 600;
 const OVERTIME = 10 * 60 * 1000; // le dépassement s'affiche 10 min au plus
+const ROW = 44;                  // hauteur d'un cran de molette, en px
+
+const KG = Array.from({ length: 401 }, (_, i) => i);
+const KG_DEC = [0, 0.25, 0.5, 0.75];
+const KG_DEC_LABELS = [',0', ',25', ',5', ',75'];
+const REPS = Array.from({ length: 100 }, (_, i) => i + 1);
+
 const I = {
   dots: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
   back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -23,29 +30,18 @@ const app = $('#app');
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const pad = n => String(n).padStart(2, '0');
-const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const today = () => iso(new Date());
-const parseISO = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 const clean = s => cap(s.trim().replace(/\s+/g, ' '));
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fold = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 const num = v => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v * 100) / 100 : null);
 const fmt = n => (n == null ? '' : String(n).replace('.', ','));
-const parseNum = str => { const t = str.trim().replace(',', '.'); return t ? num(parseFloat(t)) : null; };
-const logged = st => st.r != null; // une série compte dès qu'elle a des répétitions
-const clampRest = v => (Number(v) > 0 ? Math.min(REST_MAX, Math.max(STEP, Math.round(v / STEP) * STEP)) : 90);
-
-const dfLong = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
-const dfLongY = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-const sameYear = s => parseISO(s).getFullYear() === new Date().getFullYear();
-const longDate = s => (sameYear(s) ? dfLong : dfLongY).format(parseISO(s));
-function shortDate(s) {
-  const d = parseISO(s);
-  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}${sameYear(s) ? '' : '.' + String(d.getFullYear()).slice(2)}`;
-}
+const logged = st => st.done && st.r != null; // seules les séries faites comptent
+const clampRest = v => (Number(v) > 0 ? clamp(Math.round(v / STEP) * STEP, STEP, REST_MAX) : 90);
 
 const fmtSet = st => (st.w ? `${fmt(st.w)}×${st.r}` : `${st.r} rép`);
 const fmtRecord = st => (st.w ? `${fmt(st.w)} kg × ${st.r}` : `${st.r} rép`);
@@ -120,6 +116,7 @@ function flush() {
 
 const exById = id => db.exercises.find(e => e.id === id);
 const exName = id => (exById(id) || { name: '?' }).name;
+// La date ne s'affiche plus ; elle sert seulement à garder l'ordre des séances.
 const order = s => `${s.date}|${String(s.createdAt).padStart(15, '0')}`;
 const sortedSessions = () => [...db.sessions].sort((a, b) => cmp(order(b), order(a)));
 const blankSets = n => Array.from({ length: n }, () => ({ w: null, r: null, done: false }));
@@ -232,6 +229,7 @@ window.addEventListener('hashchange', () => {
   else if (navStack.length > 1 && navStack[navStack.length - 2] === h) { navStack.pop(); restore = true; }
   else navStack.push(h);
   closeSheet();
+  hideToast();
   route();
   scrollTo(0, restore ? scrollMem[h] || 0 : 0);
 });
@@ -256,7 +254,6 @@ function renderSessions() {
   const rows = sortedSessions().map(s => `
     <a class="srow" href="#/s/${s.id}">
       <span class="sname">${esc(s.name.trim() || 'sans titre')}</span>
-      <span class="sdate">${shortDate(s.date)}</span>
       <span class="ssub">${esc(s.entries.map(en => exName(en.exerciseId)).join(', '))}</span>
     </a>`).join('');
   app.innerHTML = `
@@ -271,21 +268,25 @@ function renderSession(s) {
   app.innerHTML = `
     <header class="top">${backBtn('/')}<button class="icon" data-act="session-menu" aria-label="Options de la séance">${I.dots}</button></header>
     <input class="title" data-field="name" value="${esc(s.name)}" placeholder="sans titre" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" aria-label="Nom de la séance">
-    <label class="date"><span class="date-text">${esc(longDate(s.date))}</span><input type="date" data-field="date" value="${s.date}" aria-label="Date de la séance"></label>
     ${s.entries.map(en => entryHTML(s, en)).join('')}
     <button class="addex" data-act="add-exercise">${I.plus}<span>exercice</span></button>`;
 }
+
+// Valeur choisie en noir, valeur proposée en gris.
+const val = (v, sug) => (v != null ? `<b>${fmt(v)}</b>` : `<b class="sug">${sug != null ? fmt(sug) : '–'}</b>`);
 
 function entryHTML(s, en) {
   const ex = exById(en.exerciseId) || { id: en.exerciseId, name: '?' };
   const sug = suggestions(s, en);
   const rows = en.sets.map((st, i) => `
     <div class="set${st.done ? ' done' : ''}" data-i="${i}">
-      <input class="num" data-field="w" inputmode="decimal" autocomplete="off" value="${fmt(st.w)}" placeholder="${fmt(sug[i].w)}" aria-label="Charge en kilos, série ${i + 1}">
-      <span class="unit">kg</span>
-      <span class="times">×</span>
-      <input class="num r" data-field="r" inputmode="numeric" pattern="[0-9]*" autocomplete="off" value="${fmt(st.r)}" placeholder="${fmt(sug[i].r)}" aria-label="Répétitions, série ${i + 1}">
-      <button class="dot" data-act="toggle-set" role="switch" aria-checked="${st.done}" aria-label="Série ${i + 1} faite"><i></i></button>
+      <div class="set-under" aria-hidden="true">supprimer</div>
+      <div class="set-face">
+        <button class="vals" data-act="edit-set" aria-label="Série ${i + 1} : choisir la charge et les répétitions">
+          <span class="key">${val(st.w, sug[i].w)}</span><span class="unit">kg</span><span class="times">×</span><span class="key r">${val(st.r, sug[i].r)}</span>
+        </button>
+        <button class="dot" data-act="toggle-set" role="switch" aria-checked="${st.done}" aria-label="Série ${i + 1} faite"><i></i></button>
+      </div>
     </div>`).join('');
   return `<section class="entry" data-entry="${en.id}">
     <div class="ehead">
@@ -302,18 +303,8 @@ function repaintEntry(en) {
   if (el) el.outerHTML = entryHTML(cur.session, en);
 }
 
-function refreshPlaceholders(el, en) {
-  const sug = suggestions(cur.session, en);
-  el.querySelectorAll('.set').forEach((row, i) => {
-    row.querySelector('[data-field="w"]').placeholder = fmt(sug[i].w);
-    row.querySelector('[data-field="r"]').placeholder = fmt(sug[i].r);
-  });
-}
-
 const entryOf = el => cur.session.entries.find(x => x.id === el.closest('.entry').dataset.entry);
-function setOf(el) {
-  return { sec: el.closest('.entry'), en: entryOf(el), i: Number(el.closest('.set').dataset.i) };
-}
+const setIndex = el => Number(el.closest('.set').dataset.i);
 
 function renderExercise(ex) {
   cur = { view: 'exercise', exercise: ex };
@@ -324,10 +315,7 @@ function renderExercise(ex) {
     if (!sets.length) continue;
     const t = topSet(sets);
     if (!best || heavier(t, best)) best = t;
-    rows.push(`<a class="hrow" href="#/s/${s.id}">
-      <span class="hdate">${shortDate(s.date)}</span>
-      <span class="hsets">${sets.map(st => `<span>${esc(fmtSet(st))}</span>`).join('')}</span>
-    </a>`);
+    rows.push(`<a class="hrow" href="#/s/${s.id}">${sets.map(st => `<span>${esc(fmtSet(st))}</span>`).join('')}</a>`);
   }
   app.innerHTML = `
     <header class="top">${backBtn('/')}<button class="icon" data-act="exercise-menu" aria-label="Options de l'exercice">${I.dots}</button></header>
@@ -340,7 +328,7 @@ function renderExercise(ex) {
 
 let sheetState = null;
 
-// opts : { title, message, input: { value, placeholder, suggest }, submit: { label, run }, actions: [...] }
+// opts : { title, message, body, mount, read, input: { value, placeholder, suggest }, submit: { label, run }, actions }
 function sheet(opts) {
   sheetState = opts;
   const root = $('#sheet');
@@ -349,6 +337,7 @@ function sheet(opts) {
     <div class="sheet" role="dialog" aria-modal="true">
       ${opts.title ? `<p class="sheet-title">${esc(opts.title)}</p>` : ''}
       ${opts.message ? `<p class="sheet-msg">${esc(opts.message)}</p>` : ''}
+      ${opts.body || ''}
       ${opts.input ? `<div class="sheet-field"><input class="sheet-input" value="${esc(opts.input.value || '')}" placeholder="${esc(opts.input.placeholder || '')}" autocomplete="off" autocorrect="off" autocapitalize="sentences" enterkeyhint="done"></div><div class="sugg" id="sugg"></div>` : ''}
       ${(opts.actions || []).map((a, i) => `<button class="sheet-row${a.danger ? ' danger' : ''}" data-act="sheet-do" data-i="${i}">${esc(a.label)}</button>`).join('')}
       ${opts.submit ? `<button class="go" data-act="sheet-submit">${esc(opts.submit.label)}</button>` : ''}
@@ -356,6 +345,7 @@ function sheet(opts) {
     </div>
   </div>`;
   const wrap = root.firstElementChild;
+  opts.mount?.(wrap);
   if (opts.input) {
     // Ouverte d'emblée : le clavier ne s'affiche que si le focus est pris pendant le geste.
     wrap.classList.add('open');
@@ -391,8 +381,13 @@ function submitSheet(value) {
   const st = sheetState;
   if (!st?.submit) return;
   const input = $('#sheet .sheet-input');
-  const v = (value ?? input?.value ?? '').trim();
-  if (!v) { input?.focus(); return; }
+  let v = value;
+  if (input) {
+    v = (value ?? input.value).trim();
+    if (!v) { input.focus(); return; }
+  } else if (st.read) {
+    v = st.read();
+  }
   closeSheet();
   st.submit.run(v);
 }
@@ -403,6 +398,138 @@ function paintSuggestions(q) {
   box.innerHTML = sheetState.input.suggest(q)
     .map(n => `<button class="sheet-row" data-act="sheet-pick" data-name="${esc(n)}">${esc(n)}</button>`)
     .join('');
+}
+
+/* ---------- Molettes ---------- */
+
+const wheelHTML = (name, labels, sel) => `<div class="wheel ${name}" data-sel="${sel}">
+  <div class="wpad"></div>${labels.map((l, i) => `<div class="witem${i === sel ? ' on' : ''}">${l}</div>`).join('')}<div class="wpad"></div>
+</div>`;
+const wheelIndex = w => clamp(Math.round(w.scrollTop / ROW), 0, w.children.length - 3);
+
+// Choisir charge et répétitions d'une série ; « then » s'exécute après validation.
+function editSet(en, i, then) {
+  const st = en.sets[i];
+  const sug = suggestions(cur.session, en)[i];
+  const w = clamp(Math.round((st.w ?? sug.w ?? 20) * 4) / 4, 0, 400.75);
+  const r = clamp(st.r ?? sug.r ?? 10, 1, 100);
+  sheet({
+    title: `${exName(en.exerciseId)} · série ${i + 1}`,
+    body: `<div class="picker">
+      <div class="band"></div>
+      ${wheelHTML('kg', KG.map(String), Math.floor(w))}
+      ${wheelHTML('dec', KG_DEC_LABELS, KG_DEC.indexOf(w - Math.floor(w)))}
+      <span class="plabel">kg</span>
+      <span class="plabel x">×</span>
+      ${wheelHTML('reps', REPS.map(String), r - 1)}
+      <span class="plabel">rép</span>
+    </div>`,
+    mount: wrap => wrap.querySelectorAll('.wheel').forEach(el => { el.scrollTop = Number(el.dataset.sel) * ROW; }),
+    read: () => {
+      const [k, d, n] = [...document.querySelectorAll('#sheet .wheel')].map(wheelIndex);
+      return { w: KG[k] + KG_DEC[d], r: REPS[n] };
+    },
+    submit: {
+      label: 'ok',
+      run: v => {
+        Object.assign(st, v);
+        then?.();
+        save();
+        repaintEntry(en);
+      },
+    },
+  });
+}
+
+// La valeur au centre de la molette s'affiche en noir.
+document.addEventListener('scroll', e => {
+  const w = e.target;
+  if (!w.classList?.contains('wheel')) return;
+  const i = wheelIndex(w);
+  if (w._sel === i) return;
+  w._sel = i;
+  w.querySelector('.witem.on')?.classList.remove('on');
+  w.children[i + 1].classList.add('on');
+}, true);
+
+/* ---------- Glisser pour supprimer une série ---------- */
+
+let drag = null;
+let swallowClick = false;
+let toastUndo = null;
+let toastTimer = 0;
+
+document.addEventListener('pointerdown', e => {
+  const face = e.target.closest('.set-face');
+  if (!face || drag || e.button > 0) return;
+  drag = { face, row: face.closest('.set'), x: e.clientX, y: e.clientY, id: e.pointerId, on: false };
+});
+
+document.addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const dx = e.clientX - drag.x;
+  const dy = e.clientY - drag.y;
+  if (!drag.on) {
+    if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { drag = null; return; }
+    if (dx > -10 || Math.abs(dx) < Math.abs(dy)) return;
+    drag.on = true;
+    drag.face.setPointerCapture?.(e.pointerId);
+    drag.row.classList.add('swiping');
+  }
+  const x = Math.min(0, dx);
+  drag.face.style.transform = `translateX(${x}px)`;
+  drag.row.classList.toggle('armed', -x > drag.row.offsetWidth * 0.35);
+});
+
+function endDrag(e) {
+  if (!drag || e.pointerId !== drag.id) return;
+  const { face, row, on } = drag;
+  drag = null;
+  if (!on) return;
+  swallowClick = true;
+  setTimeout(() => { swallowClick = false; }, 0);
+  row.classList.remove('swiping');
+  if (e.type === 'pointerup' && row.classList.contains('armed')) {
+    deleteSet(row);
+  } else {
+    face.style.transform = '';
+    row.classList.remove('armed');
+  }
+}
+document.addEventListener('pointerup', endDrag);
+document.addEventListener('pointercancel', endDrag);
+
+function deleteSet(row) {
+  const en = entryOf(row);
+  const i = setIndex(row);
+  haptic();
+  row.querySelector('.set-face').style.transform = 'translateX(-100%)';
+  row.style.height = `${row.offsetHeight}px`;
+  requestAnimationFrame(() => { row.style.height = '0px'; });
+  setTimeout(() => {
+    const [set] = en.sets.splice(i, 1);
+    save();
+    repaintEntry(en);
+    toast('série supprimée', () => { en.sets.splice(i, 0, set); save(); repaintEntry(en); });
+  }, 220);
+}
+
+function toast(text, undo) {
+  const el = $('#toast');
+  el.innerHTML = `<span>${esc(text)}</span><button data-act="undo">annuler</button>`;
+  toastUndo = undo;
+  el.hidden = false;
+  requestAnimationFrame(() => el.classList.add('show'));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, 4000);
+}
+
+function hideToast() {
+  const el = $('#toast');
+  toastUndo = null;
+  clearTimeout(toastTimer);
+  el.classList.remove('show');
+  setTimeout(() => { if (!el.classList.contains('show')) el.hidden = true; }, 200);
 }
 
 /* ---------- Minuteur ---------- */
@@ -462,7 +589,7 @@ const timer = {
       paintTimer();
     } else {
       if (this.running()) this.stop();
-      db.settings.rest = Math.min(REST_MAX, Math.max(STEP, db.settings.rest + delta));
+      db.settings.rest = clamp(db.settings.rest + delta, STEP, REST_MAX);
       save();
       paintTimer();
     }
@@ -589,6 +716,11 @@ $('#file').addEventListener('change', async e => {
 
 /* ---------- Actions ---------- */
 
+function markDone(st) {
+  st.done = true;
+  timer.start(db.settings.rest);
+}
+
 const actions = {
   back: el => back(el.dataset.parent),
 
@@ -619,8 +751,11 @@ const actions = {
     repaintEntry(en);
   },
 
+  'edit-set': el => editSet(entryOf(el), setIndex(el)),
+
   'toggle-set': el => {
-    const { sec, en, i } = setOf(el);
+    const en = entryOf(el);
+    const i = setIndex(el);
     const st = en.sets[i];
     if (st.done) {
       st.done = false;
@@ -628,12 +763,10 @@ const actions = {
       const sug = suggestions(cur.session, en)[i];
       const w = st.w ?? sug.w;
       const r = st.r ?? sug.r;
-      if (r == null) {
-        sec.querySelector(`.set[data-i="${i}"] [data-field="${w == null ? 'w' : 'r'}"]`).focus();
-        return;
-      }
-      Object.assign(st, { w, r, done: true });
-      timer.start(db.settings.rest);
+      // Rien à valider : on choisit d'abord les valeurs.
+      if (r == null) { editSet(en, i, () => markDone(st)); return; }
+      Object.assign(st, { w, r });
+      markDone(st);
     }
     haptic();
     save();
@@ -646,7 +779,6 @@ const actions = {
     const i = s.entries.indexOf(en);
     const move = d => () => { s.entries.splice(i, 1); s.entries.splice(i + d, 0, en); save(); renderSession(s); };
     const list = [];
-    if (en.sets.length) list.push({ label: 'supprimer la dernière série', run: () => { en.sets.pop(); save(); repaintEntry(en); } });
     if (i > 0) list.push({ label: 'monter', run: move(-1) });
     if (i < s.entries.length - 1) list.push({ label: 'descendre', run: move(1) });
     list.push({
@@ -723,6 +855,8 @@ const actions = {
     ],
   }),
 
+  undo: () => { const u = toastUndo; hideToast(); u?.(); },
+
   'sheet-do': el => runSheetAction(Number(el.dataset.i)),
   'sheet-submit': () => submitSheet(),
   'sheet-pick': el => submitSheet(el.dataset.name),
@@ -734,28 +868,22 @@ const actions = {
 };
 
 document.addEventListener('click', e => {
+  if (swallowClick) { swallowClick = false; e.preventDefault(); return; }
+  const item = e.target.closest('.witem');
+  if (item) {
+    const w = item.parentElement;
+    w.scrollTo({ top: ([...w.children].indexOf(item) - 1) * ROW, behavior: 'smooth' });
+    return;
+  }
   const el = e.target.closest('[data-act]');
   if (el && actions[el.dataset.act]) actions[el.dataset.act](el, e);
-  else if (e.target.matches('input[type="date"]')) { try { e.target.showPicker(); } catch {} }
 });
 
 document.addEventListener('input', e => {
   const el = e.target;
-  const f = el.dataset.field;
-  if (f === 'w' || f === 'r') {
-    const { sec, en, i } = setOf(el);
-    let n = parseNum(el.value);
-    if (f === 'r' && n != null) n = Math.round(n);
-    en.sets[i][f] = n;
-    save();
-    refreshPlaceholders(sec, en);
-  } else if (f === 'name') {
+  if (el.dataset.field === 'name') {
     cur.session.name = el.value;
     save();
-  } else if (f === 'date' && el.value) {
-    cur.session.date = el.value;
-    save();
-    $('.date-text').textContent = stamp(el.value);
   } else if (el.matches('.sheet-input') && sheetState?.input?.suggest) {
     paintSuggestions(el.value);
   }
@@ -763,20 +891,11 @@ document.addEventListener('input', e => {
 
 document.addEventListener('change', e => {
   const el = e.target;
-  const f = el.dataset.field;
-  if (f === 'w' || f === 'r') {
-    const { en, i } = setOf(el);
-    el.value = fmt(en.sets[i][f]);
-  } else if (f === 'name') {
+  if (el.dataset.field === 'name') {
     cur.session.name = el.value.trim();
     el.value = cur.session.name;
     save();
   }
-});
-
-document.addEventListener('focusin', e => {
-  const el = e.target;
-  if (el.matches('.num')) setTimeout(() => { try { el.setSelectionRange(0, el.value.length); } catch {} }, 0);
 });
 
 document.addEventListener('keydown', e => {
@@ -784,7 +903,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && sheetState) closeSheet();
   if (e.key !== 'Enter') return;
   if (el.matches('.sheet-input')) { e.preventDefault(); submitSheet(); }
-  else if (el.matches('.title, .num')) el.blur();
+  else if (el.matches('.title')) el.blur();
 });
 
 // Garde les feuilles au-dessus du clavier.

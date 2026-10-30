@@ -83,19 +83,12 @@ h1, .title {
 
 /* — Séances — */
 
-.srow {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: baseline;
-  gap: 3px 16px;
-  padding: 16px 0;
-  border-top: 1px solid var(--line);
-}
+.srow { display: block; padding: 16px 0; border-top: 1px solid var(--line); }
 .srow:active { opacity: .5; }
-.sname { font: 600 19px/1.25 var(--sans); letter-spacing: -.01em; }
-.sdate { font: 400 13px/1 var(--mono); color: var(--grey); }
+.sname { display: block; font: 600 19px/1.25 var(--sans); letter-spacing: -.01em; }
 .ssub {
-  grid-column: 1 / -1;
+  display: block;
+  margin-top: 3px;
   color: var(--grey);
   font-size: 15px;
   white-space: nowrap;
@@ -123,48 +116,58 @@ h1, .title {
 
 /* — Séance — */
 
-.date { position: relative; display: inline-block; margin-top: 6px; padding: 4px 0; font: 400 14px/1 var(--mono); color: var(--grey); }
-.date input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  opacity: 0;
-  border: 0;
-  font-size: 16px;
-  -webkit-appearance: none;
-  appearance: none;
-}
-
 .entry { margin-top: 36px; }
 .ehead { display: flex; align-items: center; justify-content: space-between; height: 36px; margin-right: -10px; }
 .ename { font: 600 18px/1.2 var(--sans); letter-spacing: -.01em; }
 .ename:active { opacity: .4; }
 .ehead .icon { color: var(--grey); }
 
-.set { display: flex; align-items: center; gap: 10px; height: 56px; }
-.num {
+.set { position: relative; height: 56px; overflow: hidden; transition: height .2s ease; }
+.set-under {
+  position: absolute;
+  inset: 6px 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 18px;
+  border-radius: 12px;
+  background: var(--key);
+  color: var(--grey);
+  font-size: 15px;
+  transition: background-color .15s, color .15s;
+}
+.set.armed .set-under { background: var(--orange); color: #FFFFFF; }
+.set-face {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  background: var(--bg);
+  touch-action: pan-y;
+  transition: transform .22s ease;
+}
+.set.swiping .set-face { transition: none; }
+
+.vals { display: flex; flex: 1; align-items: center; gap: 10px; height: 100%; }
+.key {
+  display: grid;
+  place-items: center;
   width: 84px;
   height: 44px;
-  padding: 0;
-  border: 0;
   border-radius: 10px;
   background: var(--key);
-  text-align: center;
   font: 500 21px/1 var(--mono);
   letter-spacing: -.02em;
-  outline: none;
-  -webkit-appearance: none;
-  appearance: none;
 }
-.num.r { width: 60px; }
-.num::placeholder { color: var(--faint); opacity: 1; }
-.num:focus { background: var(--bg); box-shadow: inset 0 0 0 2px var(--ink); }
-.set.done .num { background: transparent; }
-.set.done .num:focus { background: var(--bg); }
+.key.r { width: 60px; }
+.key b { font-weight: 500; }
+.key .sug { color: var(--faint); }
+.vals:active .key { background: #E6E6E6; }
+.set.done .key { background: transparent; }
 .unit { font: 400 13px/1 var(--mono); color: var(--grey); }
 .times { margin: 0 2px; font: 400 15px/1 var(--mono); color: var(--grey); }
 
-.dot { display: grid; place-items: center; width: 44px; height: 44px; margin: 0 -10px 0 auto; }
+.dot { display: grid; place-items: center; width: 44px; height: 44px; margin-right: -10px; }
 .dot i { width: 24px; height: 24px; border: 1.5px solid #CFCFCF; border-radius: 50%; transition: background-color .15s, border-color .15s; }
 .set.done .dot i { background: var(--orange); border-color: var(--orange); }
 .dot:active i { transform: scale(.9); }
@@ -193,16 +196,14 @@ h1, .title {
 .record { margin: 10px 0 28px; color: var(--grey); font-size: 15px; }
 .record b { margin-left: 6px; font: 500 15px/1 var(--mono); color: var(--ink); }
 .hrow {
-  display: grid;
-  grid-template-columns: 64px 1fr;
-  gap: 12px;
-  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
   padding: 14px 0;
   border-top: 1px solid var(--line);
+  font: 400 15px/1.2 var(--mono);
 }
 .hrow:active { opacity: .5; }
-.hdate { font: 400 13px/1 var(--mono); color: var(--grey); }
-.hsets { display: flex; flex-wrap: wrap; gap: 6px 16px; font: 400 15px/1.2 var(--mono); }
 
 /* — Repos — */
 
@@ -300,10 +301,75 @@ h1, .title {
 }
 .sheet .go:active { opacity: .85; }
 
+/* — Molettes — */
+
+.picker {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 220px;
+  margin: 6px var(--pad) 10px;
+}
+.band { position: absolute; left: 0; right: 0; top: 88px; height: 44px; border-radius: 12px; background: var(--key); }
+.wheel {
+  position: relative;
+  height: 220px;
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(transparent, #000 32%, #000 68%, transparent);
+  mask-image: linear-gradient(transparent, #000 32%, #000 68%, transparent);
+}
+.wheel::-webkit-scrollbar { display: none; }
+.wpad { height: 88px; }
+.witem {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 44px;
+  scroll-snap-align: center;
+  font: 500 24px/1 var(--mono);
+  letter-spacing: -.02em;
+  color: var(--faint);
+}
+.witem.on { color: var(--ink); }
+.wheel.kg { width: 70px; }
+.wheel.dec { width: 48px; }
+.wheel.dec .witem { justify-content: flex-start; font-size: 19px; }
+.wheel.reps { width: 58px; }
+.plabel { position: relative; margin-left: 6px; font: 400 14px/1 var(--mono); color: var(--grey); }
+.plabel.x { margin: 0 12px 0 14px; font-size: 16px; }
+
+/* — Annuler — */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + 100px);
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  padding: 0 6px 0 18px;
+  border-radius: 12px;
+  background: var(--ink);
+  color: #FFFFFF;
+  font-size: 15px;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translate(-50%, 8px);
+  transition: opacity .18s, transform .18s;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast button { height: 40px; padding: 0 12px; color: var(--orange); font-weight: 600; }
+
 @media (max-width: 359px) {
   :root { --pad: 18px; }
-  .num { width: 72px; }
-  .num.r { width: 52px; }
+  .key { width: 72px; }
+  .key.r { width: 52px; }
   .tclock { font-size: 32px; }
 }
 

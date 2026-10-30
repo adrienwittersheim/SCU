@@ -2,11 +2,12 @@
 
 Carnet de musculation pour téléphone. Séances, exercices, séries, charges — et un minuteur de repos.
 
-- **Séance** : un nom, une date, des exercices. le `+` orange, puis `exercice` : on tape son nom, les exercices déjà faits sont proposés.
-- **Série** : charge en kg, répétitions, un rond à toucher quand c'est fait.
-- Les cases vides montrent en gris les valeurs de la dernière fois. Toucher le rond les valide telles quelles et lance le repos.
+- **Séance** : un nom et des exercices. Le `+` orange, puis `exercice` : on tape son nom, les exercices déjà faits sont proposés.
+- **Série** : toucher les chiffres ouvre des molettes (kg, décimale, répétitions). Toucher le rond valide la série et lance le repos.
+- Les chiffres en gris sont ceux de la dernière fois : un toucher sur le rond suffit pour les refaire.
+- Glisser une série vers la gauche la supprime (avec « annuler »).
 - **Repos** : `−` / `+` (15 s) règlent la durée par défaut à l'arrêt, ou le décompte en cours. Vibration et bip à la fin, écran maintenu allumé pendant le repos.
-- Toucher le nom d'un exercice affiche son historique et son record.
+- Toucher le nom d'un exercice affiche son historique et son record. Seules les séries validées comptent.
 - Hors ligne. Aucune dépendance, aucun compte, aucun serveur : les données restent sur le téléphone. `···` en haut de l'accueil → exporter / importer une sauvegarde.
 
 ## Installer sur le téléphone
