@@ -15,11 +15,12 @@ const OVERTIME = 10 * 60 * 1000; // le dépassement s'affiche 10 min au plus
 const LATE = 4 * 3600 * 1000;    // une séance commencée tard reste cochée après minuit
 
 
+// Icônes Phosphor, graisse « bold » (licence MIT) : une seule famille, une seule graisse.
 const I = {
-  dots: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
-  back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5v15M4.5 12h15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
-  minus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 12h13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  dots: '<svg viewBox="0 0 256 256" aria-hidden="true"><path d="M144,128a16,16,0,1,1-16-16A16,16,0,0,1,144,128ZM60,112a16,16,0,1,0,16,16A16,16,0,0,0,60,112Zm136,0a16,16,0,1,0,16,16A16,16,0,0,0,196,112Z"/></svg>',
+  back: '<svg viewBox="0 0 256 256" aria-hidden="true"><path d="M168.49,199.51a12,12,0,0,1-17,17l-80-80a12,12,0,0,1,0-17l80-80a12,12,0,0,1,17,17L97,128Z"/></svg>',
+  plus: '<svg viewBox="0 0 256 256" aria-hidden="true"><path d="M228,128a12,12,0,0,1-12,12H140v76a12,12,0,0,1-24,0V140H40a12,12,0,0,1,0-24h76V40a12,12,0,0,1,24,0v76h76A12,12,0,0,1,228,128Z"/></svg>',
+  minus: '<svg viewBox="0 0 256 256" aria-hidden="true"><path d="M228,128a12,12,0,0,1-12,12H40a12,12,0,0,1,0-24H216A12,12,0,0,1,228,128Z"/></svg>',
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -315,14 +316,14 @@ function renderSessions() {
     return `<a class="card${live ? ' live' : ''}" href="#/s/${s.id}">
       ${tag ? `<span class="tag">${esc(tag)}</span>` : ''}
       <span class="ctitle">${esc(title)}</span>
-      <span class="cfoot"><span class="tag">${live ? 'en cours' : 'exercices'}</span><span class="big">${pad(s.entries.length)}</span></span>
+      <span class="cfoot"><span class="tag">${live ? 'En cours' : 'Exercices'}</span><span class="big">${pad(s.entries.length)}</span></span>
     </a>`;
   }).join('');
   app.innerHTML = `
     <header class="top"><span></span><button class="icon" data-act="app-menu" aria-label="Sauvegarde">${I.dots}</button></header>
     <h1 class="hero">Séances<sup>${db.sessions.length}</sup></h1>
     <nav class="cards">${cards || '<p class="empty">Aucune séance.</p>'}</nav>
-    <button class="fab" data-act="new-session" aria-label="Nouvelle séance">${I.plus}</button>`;
+    <div class="dock"><button class="go" data-act="new-session">${I.plus}<span>Nouvelle séance</span></button></div>`;
 }
 
 function renderSession(s) {
@@ -333,10 +334,10 @@ function renderSession(s) {
     ${tag ? `<p class="tag">${esc(tag)}</p>` : ''}
     <h1 class="hero">${esc(title)}</h1>
     ${s.entries.map(entryHTML).join('')}
-    <button class="addex" data-act="add-exercise">${I.plus}<span>exercice</span></button>`;
+    <button class="addex" data-act="add-exercise">${I.plus}<span>Exercice</span></button>`;
 }
 
-const targetHTML = en => `${fmtTarget(en.target)}${goUp(en) ? '<span class="up">↑ monter</span>' : ''}`;
+const targetHTML = en => `${fmtTarget(en.target)}${goUp(en) ? '<span class="up">↑ Monter</span>' : ''}`;
 
 function entryHTML(en) {
   const ex = exById(en.exerciseId) || { id: en.exerciseId, name: '?' };
@@ -357,11 +358,11 @@ function entryHTML(en) {
   return `<section class="entry${done && done === en.sets.length ? ' complete' : ''}" data-entry="${en.id}">
     <div class="ehead">
       <div><a class="ename" href="#/e/${ex.id}" draggable="false">${esc(ex.name)}</a>${target}</div>
-      <span class="count" aria-label="${done} séries faites sur ${en.sets.length}">${done}<small>/${en.sets.length}</small></span>
+      ${done ? `<span class="count" aria-label="${done} séries faites sur ${en.sets.length}">${done}<small>/${en.sets.length}</small></span>` : ''}
       <button class="icon" data-act="entry-menu" aria-label="Options de l'exercice">${I.dots}</button>
     </div>
     ${rows}
-    <button class="addset" data-act="add-set">${I.plus}<span>série</span></button>
+    <button class="addset" data-act="add-set">${I.plus}<span>Série</span></button>
   </section>`;
 }
 
@@ -383,8 +384,8 @@ function renderExercise(ex) {
   app.innerHTML = `
     <header class="top">${backBtn('/')}<button class="icon" data-act="exercise-menu" aria-label="Options de l'exercice">${I.dots}</button></header>
     <h1 class="hero">${esc(ex.name)}</h1>
-    <div class="record"><span class="tag">record</span><div>${record}</div></div>
-    ${all.length ? `<p class="tag hlabel">séances<sup>${all.length}</sup></p>` : ''}
+    <div class="record"><span class="tag">Record</span><div>${record}</div></div>
+    ${all.length ? `<p class="tag hlabel">Séances<sup>${all.length}</sup></p>` : ''}
     ${all.map(sets => `<div class="hrow">${sets.map(st => `<span>${esc(fmtSet(st))}</span>`).join('')}</div>`).join('')}`;
 }
 
@@ -405,7 +406,7 @@ function sheet(opts) {
       ${opts.input ? `<div class="sheet-field"><input class="sheet-input" value="${esc(opts.input.value || '')}" placeholder="${esc(opts.input.placeholder || '')}" autocomplete="off" autocorrect="off" autocapitalize="sentences" enterkeyhint="done"></div><div class="sugg" id="sugg"></div>` : ''}
       ${(opts.actions || []).map((a, i) => `<button class="sheet-row${a.danger ? ' danger' : ''}" data-act="sheet-do" data-i="${i}">${esc(a.label)}</button>`).join('')}
       ${opts.submit ? `<button class="go" data-act="sheet-submit">${esc(opts.submit.label)}</button>` : ''}
-      <button class="sheet-row cancel" data-act="sheet-close">${esc(opts.cancel || 'annuler')}</button>
+      <button class="sheet-row cancel" data-act="sheet-close">${esc(opts.cancel || 'Annuler')}</button>
     </div>
   </div>`;
   const wrap = root.firstElementChild;
@@ -479,8 +480,8 @@ function editTarget(en) {
       const lo = Math.min(a || b, b || a);
       return { sets: n, min: lo, max: Math.max(a, b, lo) };
     },
-    actions: en.target ? [{ label: 'sans objectif', run: () => { en.target = null; save(); repaintEntry(en); } }] : [],
-    submit: { label: 'ok', run: v => { if (v) { en.target = v; save(); repaintEntry(en); } } },
+    actions: en.target ? [{ label: 'Sans objectif', run: () => { en.target = null; save(); repaintEntry(en); } }] : [],
+    submit: { label: 'OK', run: v => { if (v) { en.target = v; save(); repaintEntry(en); } } },
   });
 }
 
@@ -677,7 +678,7 @@ function deleteSet(row) {
 
 function toast(text, undo) {
   const el = $('#toast');
-  el.innerHTML = `<span>${esc(text)}</span><button data-act="undo">annuler</button>`;
+  el.innerHTML = `<span>${esc(text)}</span><button data-act="undo">Annuler</button>`;
   toastUndo = undo;
   el.hidden = false;
   requestAnimationFrame(() => el.classList.add('show'));
@@ -783,7 +784,7 @@ function paintTimer() {
   const mm = pad(Math.floor(secs / 60));
   const html = `${over ? '+' : ''}${mm[0] === '0' ? `<span class="z">0</span>${mm[1]}` : mm}:${pad(secs % 60)}`;
   if (tClock.innerHTML !== html) tClock.innerHTML = html;
-  const state = over ? 'terminé' : run ? 'arrêter' : 'démarrer';
+  const state = over ? 'Terminé' : run ? 'Arrêter' : 'Démarrer';
   if (tState.textContent !== state) tState.textContent = state;
   tGo.setAttribute('aria-label', run ? 'Arrêter le repos' : 'Démarrer le repos');
 
@@ -865,14 +866,14 @@ $('#file').addEventListener('change', async e => {
   if (!f) return;
   let data;
   try { data = normalize(JSON.parse(await f.text())); } catch {
-    sheet({ message: 'Fichier illisible.', cancel: 'ok' });
+    sheet({ message: 'Fichier illisible.', cancel: 'OK' });
     return;
   }
   const n = data.sessions.length;
   sheet({
     message: `Remplacer toutes les données par ce fichier (${n} séance${n > 1 ? 's' : ''}) ?`,
     actions: [{
-      label: 'remplacer',
+      label: 'Remplacer',
       danger: true,
       run: () => { db = data; pruneExercises(); flush(); timer.stop(); replace('/'); route(); },
     }],
@@ -885,9 +886,9 @@ const actions = {
   back: el => back(el.dataset.parent),
 
   'new-session': () => sheet({
-    input: { placeholder: 'nom de la séance' },
+    input: { placeholder: 'Nom de la séance' },
     submit: {
-      label: 'créer',
+      label: 'Créer',
       run: name => {
         const s = { id: uid(), name: clean(name), entries: [] };
         db.sessions.push(s);
@@ -898,9 +899,9 @@ const actions = {
   }),
 
   'add-exercise': () => sheet({
-    input: { placeholder: "nom de l'exercice", suggest: matchExercises },
+    input: { placeholder: "Nom de l'exercice", suggest: matchExercises },
     submit: {
-      label: 'ajouter',
+      label: 'Ajouter',
       run: name => {
         const en = addEntry(cur.session, createExercise(name).id);
         save();
@@ -940,12 +941,12 @@ const actions = {
   'entry-menu': el => {
     const s = cur.session;
     const en = entryOf(el);
-    const list = [{ label: 'objectif', run: () => editTarget(en) }];
+    const list = [{ label: 'Objectif', run: () => editTarget(en) }];
     list.push({
-      label: "retirer l'exercice",
+      label: "Retirer l'exercice",
       danger: true,
       confirm: `Retirer ${exName(en.exerciseId)} de cette séance ? Son historique est conservé.`,
-      confirmLabel: 'retirer',
+      confirmLabel: 'Retirer',
       run: () => { s.entries.splice(s.entries.indexOf(en), 1); save(); renderSession(s); },
     });
     sheet({ title: exName(en.exerciseId), actions: list });
@@ -957,17 +958,17 @@ const actions = {
       title: s.name || 'Sans titre',
       actions: [
         {
-          label: 'renommer',
+          label: 'Renommer',
           run: () => sheet({
-            input: { value: s.name, placeholder: 'nom de la séance' },
-            submit: { label: 'enregistrer', run: v => { s.name = clean(v); save(); route(); } },
+            input: { value: s.name, placeholder: 'Nom de la séance' },
+            submit: { label: 'Enregistrer', run: v => { s.name = clean(v); save(); route(); } },
           }),
         },
         {
-          label: 'supprimer la séance',
+          label: 'Supprimer la séance',
           danger: true,
           confirm: 'Supprimer cette séance ? L’historique des exercices est conservé.',
-          confirmLabel: 'supprimer',
+          confirmLabel: 'Supprimer',
           run: () => { db.sessions = db.sessions.filter(x => x !== s); save(); back('/'); },
         },
       ],
@@ -980,17 +981,17 @@ const actions = {
       title: ex.name,
       actions: [
         {
-          label: 'renommer',
+          label: 'Renommer',
           run: () => sheet({
-            input: { value: ex.name, placeholder: "nom de l'exercice" },
-            submit: { label: 'enregistrer', run: v => { ex.name = clean(v); save(); route(); } },
+            input: { value: ex.name, placeholder: "Nom de l'exercice" },
+            submit: { label: 'Enregistrer', run: v => { ex.name = clean(v); save(); route(); } },
           }),
         },
         {
-          label: "supprimer l'exercice",
+          label: "Supprimer l'exercice",
           danger: true,
           confirm: `Supprimer ${ex.name} de toutes les séances, avec son historique ?`,
-          confirmLabel: 'supprimer',
+          confirmLabel: 'Supprimer',
           run: () => {
             db.exercises = db.exercises.filter(x => x !== ex);
             for (const s of db.sessions) s.entries = s.entries.filter(en => en.exerciseId !== ex.id);
@@ -1007,8 +1008,8 @@ const actions = {
     title: 'Sauvegarde',
     message: 'Les données restent sur ce téléphone.',
     actions: [
-      { label: 'exporter', run: exportData },
-      { label: 'importer', run: () => $('#file').click() },
+      { label: 'Exporter', run: exportData },
+      { label: 'Importer', run: () => $('#file').click() },
     ],
   }),
 
